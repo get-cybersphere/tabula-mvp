@@ -165,6 +165,139 @@ function seedDemoData() {
   }
 }
 
+// ─── Means Test: Anthropic Extraction ────────────────────────
+const Anthropic = require('@anthropic-ai/sdk').default;
+
+function getAnthropicClient() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set');
+  return new Anthropic({ apiKey });
+}
+
+function getExtractionPrompt(docCategory) {
+  const baseInstruction = `You are a financial document extraction assistant for bankruptcy case preparation.
+Extract ALL financial data from this document into structured JSON.
+Be precise with numbers — do not round. If a value is unclear, include it with a "confidence": "low" flag.
+Return ONLY valid JSON, no markdown fences or explanation.`;
+
+  switch (docCategory) {
+    case 'paystub':
+      return `${baseInstruction}
+
+Extract from this paystub:
+{
+  "type": "paystub",
+  "employer": "employer name",
+  "payPeriod": "MM/DD/YYYY - MM/DD/YYYY",
+  "payFrequency": "weekly|biweekly|semimonthly|monthly",
+  "grossPay": 0.00,
+  "federalTax": 0.00,
+  "stateTax": 0.00,
+  "socialSecurity": 0.00,
+  "medicare": 0.00,
+  "healthInsurance": 0.00,
+  "retirement401k": 0.00,
+  "otherDeductions": 0.00,
+  "garnishments": 0.00,
+  "netPay": 0.00,
+  "ytdGross": 0.00,
+  "ytdNet": 0.00
+}`;
+
+    case 'bank_statement':
+      return `${baseInstruction}
+
+Extract from this bank statement:
+{
+  "type": "bank_statement",
+  "bank": "bank name",
+  "accountType": "Checking|Savings",
+  "accountLast4": "1234",
+  "statementPeriod": "MM/DD/YYYY - MM/DD/YYYY",
+  "openingBalance": 0.00,
+  "closingBalance": 0.00,
+  "totalDeposits": 0.00,
+  "totalWithdrawals": 0.00,
+  "monthlyExpenses": {
+    "rent": 0.00,
+    "utilities": 0.00,
+    "groceries": 0.00,
+    "gas": 0.00,
+    "insurance": 0.00,
+    "carPayment": 0.00,
+    "subscriptions": 0.00,
+    "other": 0.00
+  },
+  "recurringPayments": [
+    { "payee": "name", "amount": 0.00, "frequency": "monthly" }
+  ]
+}`;
+
+    case 'tax_return':
+      return `${baseInstruction}
+
+Extract from this tax return:
+{
+  "type": "tax_return",
+  "filingStatus": "Single|Married Filing Jointly|Married Filing Separately|Head of Household",
+  "taxYear": 2024,
+  "wagesIncome": 0.00,
+  "interestIncome": 0.00,
+  "businessIncome": 0.00,
+  "otherIncome": 0.00,
+  "totalIncome": 0.00,
+  "agi": 0.00,
+  "standardDeduction": 0.00,
+  "itemizedDeductions": 0.00,
+  "taxableIncome": 0.00,
+  "totalTax": 0.00,
+  "dependents": 0
+}`;
+
+    default:
+      return `${baseInstruction}
+
+Extract all financial data you can find. Categorize the document and return structured JSON with:
+{
+  "type": "other",
+  "documentCategory": "description of what this document is",
+  "financialData": { ... any relevant financial figures ... },
+  "notes": "any important observations"
+}`;
+  }
+}
+
+async function extractWithClaude(filePath, docCategory) {
+  const client = getAnthropicClient();
+  const fileBuffer = fs.readFileSync(filePath);
+  const base64Data = fileBuffer.toString('base64');
+  const ext = path.extname(filePath).toLowerCase();
+
+  let mediaType = 'application/pdf';
+  if (['.png'].includes(ext)) mediaType = 'image/png';
+  else if (['.jpg', '.jpeg'].includes(ext)) mediaType = 'image/jpeg';
+
+  const isPdf = ext === '.pdf';
+
+  const content = [
+    isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: base64Data } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
+    { type: 'text', text: getExtractionPrompt(docCategory) },
+  ];
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content }],
+  });
+
+  const text = response.content.find(b => b.type === 'text')?.text || '{}';
+  // Strip markdown fences if present
+  const cleaned = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
+  return JSON.parse(cleaned);
+}
+
 // ─── IPC Handlers ─────────────────────────────────────────────
 function registerIPC() {
   // Cases
@@ -334,6 +467,32 @@ function registerIPC() {
   ipcMain.handle('review-flags:resolve', (_, id) => {
     db.prepare('UPDATE review_flags SET resolved = 1 WHERE id = ?').run(id);
     return { success: true };
+  });
+
+  // ─── Means Test ──────────────────────────────────────────────
+  // Upload files for means test (returns file metadata, no DB storage)
+  ipcMain.handle('means-test:upload-files', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Documents', extensions: ['pdf', 'png', 'jpg', 'jpeg'] }],
+    });
+    if (result.canceled) return [];
+    return result.filePaths.map((fp) => ({
+      path: fp,
+      name: path.basename(fp),
+      size: fs.statSync(fp).size,
+      ext: path.extname(fp).toLowerCase(),
+    }));
+  });
+
+  // Extract data from a single file using Claude
+  ipcMain.handle('means-test:extract', async (_, filePath, docCategory) => {
+    return extractWithClaude(filePath, docCategory);
+  });
+
+  // Check if API key is configured
+  ipcMain.handle('means-test:check-api-key', () => {
+    return !!process.env.ANTHROPIC_API_KEY;
   });
 
   // Stats for dashboard

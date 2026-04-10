@@ -64,6 +64,21 @@ export default function Sidebar({ navigate, currentPage }) {
           <span className="sidebar-badge">{stats.total}</span>
         </div>
 
+        <div className="sidebar-section-label">Tools</div>
+
+        <div
+          className={`sidebar-link ${currentPage === 'means-test' ? 'active' : ''}`}
+          onClick={() => navigate('/means-test')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="3" x2="12" y2="21" />
+            <polyline points="1 14 12 3 23 14" />
+            <path d="M1 14a5 5 0 0 0 10 0" />
+            <path d="M13 14a5 5 0 0 0 10 0" />
+          </svg>
+          Means Test
+        </div>
+
         <div className="sidebar-section-label">Pipeline</div>
 
         <div className="sidebar-link" onClick={() => navigate('/')}>

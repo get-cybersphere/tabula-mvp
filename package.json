@@ -22,6 +22,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.87.0",
     "better-sqlite3": "^12.8.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -45,6 +46,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/uuid": "^10.0.0",
+    "concurrently": "^9.2.1",
     "electron": "41.2.0",
     "esbuild": "^0.28.0"
   }

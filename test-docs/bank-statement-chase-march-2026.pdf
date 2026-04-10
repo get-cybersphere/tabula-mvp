@@ -1,0 +1,142 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 4 0 R >> >> >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 2678 >>
+stream
+BT
+/F1 14 Tf
+50 770 Td
+(ACCOUNT STATEMENT) Tj
+/F1 11 Tf
+0 -30 Td
+(========================================) Tj
+0 -15 Td
+(CHASE BANK - CHECKING ACCOUNT STATEMENT) Tj
+0 -15 Td
+(========================================) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(Account Holder: Marcus T. Johnson) Tj
+0 -15 Td
+(Account Number: ****4821) Tj
+0 -15 Td
+(Statement Period: 03/01/2026 - 03/31/2026) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(Opening Balance:              $1,847.22) Tj
+0 -15 Td
+(Closing Balance:                $923.45) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(Total Deposits:              $4,218.00) Tj
+0 -15 Td
+(Total Withdrawals:           $5,141.77) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(--- DEPOSITS ---) Tj
+0 -15 Td
+(03/06  Direct Deposit - ACME INDUSTRIES    $1,401.47) Tj
+0 -15 Td
+(03/15  Venmo Transfer                        $150.00) Tj
+0 -15 Td
+(03/20  Direct Deposit - ACME INDUSTRIES    $1,401.47) Tj
+0 -15 Td
+(03/25  Tax Refund - IRS                    $1,265.06) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(--- RECURRING PAYMENTS ---) Tj
+0 -15 Td
+(03/01  Rent - Oakwood Apartments           $1,450.00) Tj
+0 -15 Td
+(03/03  Geico Auto Insurance                  $225.00) Tj
+0 -15 Td
+(03/05  AT&T Wireless                          $87.42) Tj
+0 -15 Td
+(03/05  Netflix                                $15.99) Tj
+0 -15 Td
+(03/05  Spotify                                $10.99) Tj
+0 -15 Td
+(03/07  TXU Energy                            $142.30) Tj
+0 -15 Td
+(03/07  City of Houston Water                  $44.85) Tj
+0 -15 Td
+(03/10  Wells Fargo Auto Loan - 2019 Civic    $347.00) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(--- OTHER TRANSACTIONS ---) Tj
+0 -15 Td
+(03/08  HEB Grocery #1204                      $87.42) Tj
+0 -15 Td
+(03/12  Walmart Supercenter                    $64.20) Tj
+0 -15 Td
+(03/15  Shell Gas Station                      $48.50) Tj
+0 -15 Td
+(03/18  HEB Grocery #1204                      $92.15) Tj
+0 -15 Td
+(03/22  Kroger Fuel Center                     $52.30) Tj
+0 -15 Td
+(03/24  Target                                 $43.80) Tj
+0 -15 Td
+(03/26  HEB Grocery #1204                      $78.55) Tj
+0 -15 Td
+(03/28  Costco Gas                             $55.20) Tj
+0 -15 Td
+(03/30  Amazon.com                             $38.60) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(Monthly Summary by Category:) Tj
+0 -15 Td
+(  Rent/Housing:     $1,450.00) Tj
+0 -15 Td
+(  Utilities:          $187.15) Tj
+0 -15 Td
+(  Groceries:          $322.32) Tj
+0 -15 Td
+(  Gas/Fuel:           $156.00) Tj
+0 -15 Td
+(  Insurance:          $225.00) Tj
+0 -15 Td
+(  Auto Loan:          $347.00) Tj
+0 -15 Td
+(  Subscriptions:       $26.98) Tj
+0 -15 Td
+(  Other:               $82.40) Tj
+0 -15 Td
+() Tj
+0 -15 Td
+(========================================) Tj
+0 -15 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3041
+%%EOF

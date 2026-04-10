@@ -50,6 +50,13 @@ contextBridge.exposeInMainWorld('tabula', {
     overview: () => ipcRenderer.invoke('stats:overview'),
   },
 
+  // Means Test
+  meansTest: {
+    uploadFiles: () => ipcRenderer.invoke('means-test:upload-files'),
+    extract: (filePath, docCategory) => ipcRenderer.invoke('means-test:extract', filePath, docCategory),
+    checkApiKey: () => ipcRenderer.invoke('means-test:check-api-key'),
+  },
+
   // Navigation listener (from menu bar)
   onNavigate: (callback) => {
     ipcRenderer.on('navigate', (_, path) => callback(path));
