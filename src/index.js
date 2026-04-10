@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
 if (require('electron-squirrel-startup')) app.quit();
 
 let mainWindow;
