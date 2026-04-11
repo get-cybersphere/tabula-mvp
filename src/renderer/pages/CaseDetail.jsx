@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { runMeansTest } from '../lib/means-test.js';
+import { getAllStates } from '../lib/median-income.js';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -134,10 +136,10 @@ export default function CaseDetail({ caseId, navigate }) {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'overview' && <OverviewTab caseData={caseData} debtor={debtor} />}
+      {activeTab === 'overview' && <OverviewTab caseData={caseData} debtor={debtor} caseId={caseId} onRefresh={loadCase} />}
       {activeTab === 'documents' && <DocumentsTab caseData={caseData} onUpload={handleUploadDocuments} onExtract={handleExtract} />}
       {activeTab === 'creditors' && <CreditorsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
-      {activeTab === 'means-test' && <MeansTestTab caseData={caseData} />}
+      {activeTab === 'means-test' && <MeansTestTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
       {activeTab === 'review' && <ReviewTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
     </div>
   );
@@ -145,11 +147,31 @@ export default function CaseDetail({ caseId, navigate }) {
 
 /* ─── Overview Tab ─────────────────────────────────────────── */
 
-function OverviewTab({ caseData, debtor }) {
+function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
   const totalDebt = (caseData.creditors || []).reduce((sum, c) => sum + (c.amount_claimed || 0), 0);
   const totalAssets = (caseData.assets || []).reduce((sum, a) => sum + (a.current_value || 0), 0);
   const monthlyIncome = (caseData.income || []).reduce((sum, i) => sum + (i.gross_monthly || 0), 0);
   const monthlyExpenses = (caseData.expenses || []).reduce((sum, e) => sum + (e.monthly_amount || 0), 0);
+
+  const jointDebtor = (caseData.debtors || []).find(d => d.is_joint === 1);
+  const [showJointForm, setShowJointForm] = useState(false);
+  const [jointForm, setJointForm] = useState({
+    firstName: '', lastName: '', ssn: '', dob: '', phone: '', email: '',
+    street: '', city: '', state: '', zip: '',
+  });
+
+  const handleAddJointDebtor = async () => {
+    if (!jointForm.firstName || !jointForm.lastName) return;
+    await window.tabula.debtors.upsert(caseId, { ...jointForm, isJoint: true });
+    setShowJointForm(false);
+    setJointForm({ firstName: '', lastName: '', ssn: '', dob: '', phone: '', email: '', street: '', city: '', state: '', zip: '' });
+    onRefresh();
+  };
+
+  const handleRemoveJointDebtor = async (id) => {
+    await window.tabula.debtors.delete(id);
+    onRefresh();
+  };
 
   return (
     <div>
@@ -196,6 +218,95 @@ function OverviewTab({ caseData, debtor }) {
             <InfoRow label="State" value={debtor.address_state || '—'} />
             <InfoRow label="ZIP" value={debtor.address_zip || '—'} />
           </div>
+        </div>
+      </div>
+
+      {/* Joint Debtor Section */}
+      <div className="card" style={{ marginTop: 20 }}>
+        <div className="card-header">
+          <span className="card-title">Joint Filing (Spouse)</span>
+          {!jointDebtor && !showJointForm && (
+            <button className="btn btn-primary btn-sm" onClick={() => setShowJointForm(true)}>+ Add Joint Debtor</button>
+          )}
+        </div>
+        <div className="card-body">
+          {jointDebtor ? (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                <div>
+                  <InfoRow label="Name" value={`${jointDebtor.first_name || ''} ${jointDebtor.last_name || ''}`} />
+                  <InfoRow label="SSN" value={jointDebtor.ssn ? `***-**-${jointDebtor.ssn.slice(-4)}` : '—'} />
+                  <InfoRow label="Date of Birth" value={jointDebtor.dob || '—'} />
+                </div>
+                <div>
+                  <InfoRow label="Phone" value={jointDebtor.phone || '—'} />
+                  <InfoRow label="Email" value={jointDebtor.email || '—'} />
+                  <InfoRow label="Address" value={jointDebtor.address_street ? `${jointDebtor.address_street}, ${jointDebtor.address_city || ''} ${jointDebtor.address_state || ''} ${jointDebtor.address_zip || ''}` : '—'} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                <button className="btn btn-sm btn-secondary" onClick={() => handleRemoveJointDebtor(jointDebtor.id)}>Remove Joint Debtor</button>
+              </div>
+            </div>
+          ) : showJointForm ? (
+            <div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">First Name</label>
+                  <input className="form-input" value={jointForm.firstName} onChange={(e) => setJointForm({ ...jointForm, firstName: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Last Name</label>
+                  <input className="form-input" value={jointForm.lastName} onChange={(e) => setJointForm({ ...jointForm, lastName: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-row-3">
+                <div className="form-group">
+                  <label className="form-label">SSN</label>
+                  <input className="form-input" value={jointForm.ssn} onChange={(e) => setJointForm({ ...jointForm, ssn: e.target.value })} placeholder="XXX-XX-XXXX" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date of Birth</label>
+                  <input className="form-input" type="date" value={jointForm.dob} onChange={(e) => setJointForm({ ...jointForm, dob: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Phone</label>
+                  <input className="form-input" value={jointForm.phone} onChange={(e) => setJointForm({ ...jointForm, phone: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Email</label>
+                <input className="form-input" value={jointForm.email} onChange={(e) => setJointForm({ ...jointForm, email: e.target.value })} />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Street</label>
+                  <input className="form-input" value={jointForm.street} onChange={(e) => setJointForm({ ...jointForm, street: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">City</label>
+                  <input className="form-input" value={jointForm.city} onChange={(e) => setJointForm({ ...jointForm, city: e.target.value })} />
+                </div>
+              </div>
+              <div className="form-row-3">
+                <div className="form-group">
+                  <label className="form-label">State</label>
+                  <input className="form-input" value={jointForm.state} onChange={(e) => setJointForm({ ...jointForm, state: e.target.value })} placeholder="e.g. TX" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">ZIP</label>
+                  <input className="form-input" value={jointForm.zip} onChange={(e) => setJointForm({ ...jointForm, zip: e.target.value })} />
+                </div>
+                <div></div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowJointForm(false)}>Cancel</button>
+                <button className="btn btn-primary btn-sm" onClick={handleAddJointDebtor}>Add Joint Debtor</button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted">No joint debtor. Click "Add Joint Debtor" for a joint filing.</p>
+          )}
         </div>
       </div>
 
@@ -447,95 +558,336 @@ function CreditorsTab({ caseData, caseId, onRefresh }) {
 
 /* ─── Means Test Tab ───────────────────────────────────────── */
 
-function MeansTestTab({ caseData }) {
+function MeansTestTab({ caseData, caseId, onRefresh }) {
+  const STATES = getAllStates();
   const income = caseData.income || [];
   const expenses = caseData.expenses || [];
+  const debtor = caseData.debtors?.[0] || {};
+  const hasJoint = (caseData.debtors || []).some(d => d.is_joint === 1);
+
+  // Income form
+  const [showIncomeForm, setShowIncomeForm] = useState(false);
+  const [incomeForm, setIncomeForm] = useState({
+    source: 'Employment', employerName: '', grossMonthly: '', netMonthly: '', payFrequency: 'monthly',
+  });
+
+  // Expense form
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [expenseForm, setExpenseForm] = useState({
+    category: 'housing', description: '', monthlyAmount: '',
+  });
+
+  // Means test parameters
+  const [stateCode, setStateCode] = useState(debtor.address_state || 'TX');
+  const [householdSize, setHouseholdSize] = useState(hasJoint ? 2 : 1);
+  const [showResult, setShowResult] = useState(false);
+
+  // Build income sources in the format runMeansTest expects
+  const incomeSources = income.map(i => ({
+    employer: i.employer_name || i.source,
+    grossAmount: i.gross_monthly || 0,
+    frequency: 'monthly', // already stored as monthly in DB
+  }));
+
   const totalGrossMonthly = income.reduce((s, i) => s + (i.gross_monthly || 0), 0);
   const totalExpenses = expenses.reduce((s, e) => s + (e.monthly_amount || 0), 0);
-  const annualized = totalGrossMonthly * 12;
-  const disposable = totalGrossMonthly - totalExpenses;
 
-  // Simplified median check (real implementation would use census data by state/household size)
-  const medianThreshold = 59580; // Approximate national median for single filer
+  // Aggregate expenses for the means test
+  const expenseMap = {};
+  for (const e of expenses) {
+    expenseMap[e.category] = (expenseMap[e.category] || 0) + (e.monthly_amount || 0);
+  }
+
+  const meansResult = showResult ? runMeansTest({
+    incomeSources,
+    stateCode,
+    householdSize,
+    extractedExpenses: expenseMap,
+  }) : null;
+
+  const handleAddIncome = async () => {
+    if (!incomeForm.grossMonthly) return;
+    await window.tabula.income.upsert(caseId, {
+      source: incomeForm.source,
+      employerName: incomeForm.employerName,
+      grossMonthly: parseFloat(incomeForm.grossMonthly) || 0,
+      netMonthly: parseFloat(incomeForm.netMonthly) || 0,
+      payFrequency: incomeForm.payFrequency,
+    });
+    setIncomeForm({ source: 'Employment', employerName: '', grossMonthly: '', netMonthly: '', payFrequency: 'monthly' });
+    setShowIncomeForm(false);
+    setShowResult(false);
+    onRefresh();
+  };
+
+  const handleDeleteIncome = async (id) => {
+    await window.tabula.income.delete(id);
+    setShowResult(false);
+    onRefresh();
+  };
+
+  const handleAddExpense = async () => {
+    if (!expenseForm.monthlyAmount) return;
+    await window.tabula.expenses.upsert(caseId, {
+      category: expenseForm.category,
+      description: expenseForm.description,
+      monthlyAmount: parseFloat(expenseForm.monthlyAmount) || 0,
+    });
+    setExpenseForm({ category: 'housing', description: '', monthlyAmount: '' });
+    setShowExpenseForm(false);
+    setShowResult(false);
+    onRefresh();
+  };
+
+  const handleDeleteExpense = async (id) => {
+    await window.tabula.expenses.delete(id);
+    setShowResult(false);
+    onRefresh();
+  };
+
+  function fmt(n) {
+    if (n == null || isNaN(n)) return '$0';
+    return '$' + Math.round(n).toLocaleString('en-US');
+  }
 
   return (
     <div>
+      {/* Means Test Parameters & Run */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-header">
           <span className="card-title">Form 122A — Chapter 7 Means Test</span>
-          <span className={`badge ${annualized < medianThreshold ? 'ready' : 'in_progress'}`}>
-            {annualized < medianThreshold ? 'Below Median' : 'Above Median'}
-          </span>
         </div>
         <div className="card-body">
-          <div className="stats-grid" style={{ marginBottom: 0 }}>
-            <div className="stat-card">
-              <div className="stat-label">Gross Monthly Income</div>
-              <div className="stat-value" style={{ fontSize: '1.6rem' }}>
-                ${totalGrossMonthly.toLocaleString()}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 16, alignItems: 'end' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">State</label>
+              <select className="form-select" value={stateCode} onChange={e => { setStateCode(e.target.value); setShowResult(false); }}>
+                {STATES.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Household Size</label>
+              <input className="form-input" type="number" min="1" max="15" value={householdSize} onChange={e => { setHouseholdSize(parseInt(e.target.value) || 1); setShowResult(false); }} />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Monthly Income / Expenses</label>
+              <div className="text-sm" style={{ padding: '9px 0' }}>
+                {fmt(totalGrossMonthly)} / {fmt(totalExpenses)}
               </div>
             </div>
-            <div className="stat-card">
-              <div className="stat-label">Annualized Income</div>
-              <div className="stat-value" style={{ fontSize: '1.6rem' }}>
-                ${annualized.toLocaleString()}
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Monthly Expenses</div>
-              <div className="stat-value" style={{ fontSize: '1.6rem' }}>
-                ${totalExpenses.toLocaleString()}
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Disposable Income</div>
-              <div className="stat-value" style={{ fontSize: '1.6rem', color: disposable < 0 ? 'var(--accent)' : 'var(--sage)' }}>
-                ${disposable.toLocaleString()}
-              </div>
-            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowResult(true)}
+              disabled={income.length === 0}
+              style={{ height: 40 }}
+            >
+              Run Means Test
+            </button>
           </div>
         </div>
       </div>
 
-      {income.length === 0 && expenses.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <h3>No income or expense data</h3>
-            <p>Upload pay stubs and bank statements to auto-populate the means test, or add data manually.</p>
+      {/* Means Test Result */}
+      {meansResult && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <span className="card-title">Result</span>
+            <span className={`badge ${meansResult.recommendation === 'chapter7' ? 'ready' : meansResult.recommendation === 'chapter13' ? 'in_progress' : 'intake'}`}>
+              {meansResult.belowMedian ? 'Below Median' : 'Above Median'}
+            </span>
           </div>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-          <div className="card">
-            <div className="card-header"><span className="card-title">Income Sources</span></div>
-            <div className="card-body">
-              {income.length > 0 ? income.map((i) => (
-                <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(10,10,10,0.04)' }}>
-                  <div>
-                    <div className="text-sm" style={{ fontWeight: 500 }}>{i.employer_name || i.source}</div>
-                    <div className="text-xs text-muted">{i.pay_frequency}</div>
-                  </div>
-                  <span className="text-mono text-sm">${(i.gross_monthly || 0).toLocaleString()}/mo</span>
+          <div className="card-body">
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div className="stat-card">
+                <div className="stat-label">Recommendation</div>
+                <div className="stat-value" style={{ fontSize: '1.4rem', color: meansResult.recommendation === 'chapter7' ? 'var(--sage)' : 'var(--accent)' }}>
+                  {meansResult.recommendation === 'chapter7' ? 'Chapter 7 Eligible' : meansResult.recommendation === 'chapter13' ? 'Chapter 13' : 'Needs Analysis'}
                 </div>
-              )) : <p className="text-sm text-muted">No income sources added.</p>}
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Confidence</div>
+                <div className="stat-value" style={{ fontSize: '1.4rem' }}>{meansResult.confidence}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Annualized Income</div>
+                <div className="stat-value" style={{ fontSize: '1.4rem' }}>{fmt(meansResult.annualIncome)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">State Median</div>
+                <div className="stat-value" style={{ fontSize: '1.4rem' }}>{fmt(meansResult.medianIncome)}</div>
+              </div>
             </div>
-          </div>
-          <div className="card">
-            <div className="card-header"><span className="card-title">Expenses</span></div>
-            <div className="card-body">
-              {expenses.length > 0 ? expenses.map((e) => (
-                <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(10,10,10,0.04)' }}>
-                  <div>
-                    <div className="text-sm" style={{ fontWeight: 500 }}>{e.category}</div>
-                    <div className="text-xs text-muted">{e.description}</div>
+
+            {meansResult.explanation.map((line, i) => (
+              <p key={i} className="text-sm" style={{ marginBottom: 6, color: 'var(--warm-gray)' }}>{line}</p>
+            ))}
+
+            {meansResult.warnings.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                {meansResult.warnings.map((w, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 12px', background: 'rgba(196, 124, 72, 0.08)', borderRadius: 6, marginBottom: 6 }}>
+                    <span style={{ color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>!</span>
+                    <span className="text-sm">{w}</span>
                   </div>
-                  <span className="text-mono text-sm">${(e.monthly_amount || 0).toLocaleString()}/mo</span>
+                ))}
+              </div>
+            )}
+
+            {meansResult.deductions && (
+              <div style={{ marginTop: 16 }}>
+                <h4 className="text-sm" style={{ fontWeight: 600, marginBottom: 8 }}>Deductions Breakdown</h4>
+                <div style={{ fontSize: '0.82rem' }}>
+                  <InfoRow label="National Standards (food/clothing)" value={fmt(meansResult.deductions.nationalStandards)} />
+                  <InfoRow label="Health Care" value={fmt(meansResult.deductions.healthCare)} />
+                  <InfoRow label="Housing & Utilities" value={fmt(meansResult.deductions.housingUtilities)} />
+                  <InfoRow label="Transportation" value={fmt(meansResult.deductions.transportation)} />
+                  <InfoRow label="Total Deductions" value={fmt(meansResult.deductions.total)} />
+                  <InfoRow label="Disposable Monthly Income" value={fmt(meansResult.disposableMonthlyIncome)} />
+                  <InfoRow label="60-Month Disposable" value={fmt(meansResult.disposable60Month)} />
                 </div>
-              )) : <p className="text-sm text-muted">No expenses added.</p>}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* Income & Expense Editors */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        {/* Income Sources */}
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Income Sources</span>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowIncomeForm(!showIncomeForm)}>
+              {showIncomeForm ? 'Cancel' : '+ Add Income'}
+            </button>
+          </div>
+          <div className="card-body">
+            {showIncomeForm && (
+              <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid rgba(10,10,10,0.06)' }}>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Source</label>
+                    <select className="form-select" value={incomeForm.source} onChange={(e) => setIncomeForm({ ...incomeForm, source: e.target.value })}>
+                      <option value="Employment">Employment</option>
+                      <option value="Self-employment">Self-employment</option>
+                      <option value="Social Security">Social Security</option>
+                      <option value="Pension">Pension</option>
+                      <option value="Rental Income">Rental Income</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Employer / Name</label>
+                    <input className="form-input" value={incomeForm.employerName} onChange={(e) => setIncomeForm({ ...incomeForm, employerName: e.target.value })} placeholder="e.g. Acme Corp" />
+                  </div>
+                </div>
+                <div className="form-row-3">
+                  <div className="form-group">
+                    <label className="form-label">Gross Monthly</label>
+                    <input className="form-input" type="number" value={incomeForm.grossMonthly} onChange={(e) => setIncomeForm({ ...incomeForm, grossMonthly: e.target.value })} placeholder="0.00" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Net Monthly</label>
+                    <input className="form-input" type="number" value={incomeForm.netMonthly} onChange={(e) => setIncomeForm({ ...incomeForm, netMonthly: e.target.value })} placeholder="0.00" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Pay Frequency</label>
+                    <select className="form-select" value={incomeForm.payFrequency} onChange={(e) => setIncomeForm({ ...incomeForm, payFrequency: e.target.value })}>
+                      <option value="weekly">Weekly</option>
+                      <option value="biweekly">Biweekly</option>
+                      <option value="semimonthly">Semi-monthly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setShowIncomeForm(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" onClick={handleAddIncome}>Add Income</button>
+                </div>
+              </div>
+            )}
+
+            {income.length > 0 ? income.map((i) => (
+              <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(10,10,10,0.04)' }}>
+                <div>
+                  <div className="text-sm" style={{ fontWeight: 500 }}>{i.employer_name || i.source}</div>
+                  <div className="text-xs text-muted">{i.pay_frequency}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className="text-mono text-sm">${(i.gross_monthly || 0).toLocaleString()}/mo</span>
+                  <button className="btn btn-sm btn-ghost" onClick={() => handleDeleteIncome(i.id)} style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
+                    x
+                  </button>
+                </div>
+              </div>
+            )) : <p className="text-sm text-muted">No income sources added.</p>}
+          </div>
+        </div>
+
+        {/* Expenses */}
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Expenses</span>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowExpenseForm(!showExpenseForm)}>
+              {showExpenseForm ? 'Cancel' : '+ Add Expense'}
+            </button>
+          </div>
+          <div className="card-body">
+            {showExpenseForm && (
+              <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid rgba(10,10,10,0.06)' }}>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Category</label>
+                    <select className="form-select" value={expenseForm.category} onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}>
+                      <option value="housing">Housing</option>
+                      <option value="rent">Rent</option>
+                      <option value="utilities">Utilities</option>
+                      <option value="food">Food / Groceries</option>
+                      <option value="transportation">Transportation</option>
+                      <option value="gas">Gas</option>
+                      <option value="carPayment">Car Payment</option>
+                      <option value="insurance">Insurance</option>
+                      <option value="healthcare">Healthcare</option>
+                      <option value="childcare">Childcare</option>
+                      <option value="education">Education</option>
+                      <option value="clothing">Clothing</option>
+                      <option value="subscriptions">Subscriptions</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Description</label>
+                    <input className="form-input" value={expenseForm.description} onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })} placeholder="Optional details" />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Monthly Amount</label>
+                  <input className="form-input" type="number" value={expenseForm.monthlyAmount} onChange={(e) => setExpenseForm({ ...expenseForm, monthlyAmount: e.target.value })} placeholder="0.00" />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setShowExpenseForm(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" onClick={handleAddExpense}>Add Expense</button>
+                </div>
+              </div>
+            )}
+
+            {expenses.length > 0 ? expenses.map((e) => (
+              <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(10,10,10,0.04)' }}>
+                <div>
+                  <div className="text-sm" style={{ fontWeight: 500 }}>{e.category}</div>
+                  <div className="text-xs text-muted">{e.description}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span className="text-mono text-sm">${(e.monthly_amount || 0).toLocaleString()}/mo</span>
+                  <button className="btn btn-sm btn-ghost" onClick={() => handleDeleteExpense(e.id)} style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
+                    x
+                  </button>
+                </div>
+              </div>
+            )) : <p className="text-sm text-muted">No expenses added.</p>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

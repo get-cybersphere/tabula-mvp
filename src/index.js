@@ -300,6 +300,57 @@ async function extractWithClaude(filePath, docCategory) {
   return JSON.parse(cleaned);
 }
 
+// ─── Auto-populate case data from extraction ─────────────────
+function populateCaseFromExtraction(caseId, docType, extracted) {
+  const { v4: uuid } = require('uuid');
+
+  if (docType === 'pay_stub' || extracted.type === 'paystub') {
+    // Convert gross pay to monthly based on frequency
+    const freq = (extracted.payFrequency || 'biweekly').toLowerCase();
+    const multipliers = { weekly: 4.33, biweekly: 2.167, semimonthly: 2, monthly: 1, annual: 1/12 };
+    const mult = multipliers[freq] || 1;
+    const grossMonthly = (extracted.grossPay || 0) * mult;
+    const netMonthly = (extracted.netPay || 0) * mult;
+
+    db.prepare('INSERT INTO income (id, case_id, source, employer_name, gross_monthly, net_monthly, pay_frequency) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      uuid(), caseId, 'Employment', extracted.employer || 'Unknown Employer',
+      Math.round(grossMonthly * 100) / 100, Math.round(netMonthly * 100) / 100, freq
+    );
+  }
+
+  if (docType === 'bank_statement' || extracted.type === 'bank_statement') {
+    const expenses = extracted.monthlyExpenses || {};
+    for (const [category, amount] of Object.entries(expenses)) {
+      if (amount && amount > 0) {
+        db.prepare('INSERT INTO expenses (id, case_id, category, description, monthly_amount) VALUES (?, ?, ?, ?, ?)').run(
+          uuid(), caseId, category, `From ${extracted.bank || 'bank'} statement`, amount
+        );
+      }
+    }
+  }
+
+  if (docType === 'credit_report' || extracted.type === 'credit_report') {
+    const accounts = extracted.accounts || [];
+    for (const acct of accounts) {
+      // Infer schedule from account type
+      let schedule = 'F'; // default nonpriority unsecured
+      let debtType = 'other';
+      const type = (acct.type || '').toLowerCase();
+      if (type.includes('auto') || type.includes('car')) { schedule = 'D'; debtType = 'auto_loan'; }
+      else if (type.includes('mortgage') || type.includes('home')) { schedule = 'D'; debtType = 'mortgage'; }
+      else if (type.includes('student')) { schedule = 'E'; debtType = 'student_loan'; }
+      else if (type.includes('credit card')) { debtType = 'credit_card'; }
+      else if (type.includes('store')) { debtType = 'credit_card'; }
+      else if (type.includes('purchased') || type.includes('collection')) { debtType = 'collections'; }
+
+      db.prepare('INSERT INTO creditors (id, case_id, name, account_number, debt_type, schedule, amount_claimed, is_disputed, is_contingent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        uuid(), caseId, acct.creditor || 'Unknown', acct.accountNum || '',
+        debtType, schedule, acct.balance || 0, 0, 0
+      );
+    }
+  }
+}
+
 // ─── IPC Handlers ─────────────────────────────────────────────
 function registerIPC() {
   // Cases
@@ -374,6 +425,24 @@ function registerIPC() {
     return { success: true };
   });
 
+  // Debtors
+  ipcMain.handle('debtors:upsert', (_, caseId, debtor) => {
+    const { v4: uuid } = require('uuid');
+    const id = debtor.id || uuid();
+    db.prepare(`INSERT OR REPLACE INTO debtors (id, case_id, is_joint, first_name, last_name, ssn, dob, address_street, address_city, address_state, address_zip, phone, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      id, caseId, debtor.isJoint ? 1 : 0,
+      debtor.firstName || '', debtor.lastName || '', debtor.ssn || '', debtor.dob || '',
+      debtor.street || '', debtor.city || '', debtor.state || '', debtor.zip || '',
+      debtor.phone || '', debtor.email || ''
+    );
+    return { id };
+  });
+
+  ipcMain.handle('debtors:delete', (_, id) => {
+    db.prepare('DELETE FROM debtors WHERE id = ? AND is_joint = 1').run(id);
+    return { success: true };
+  });
+
   // Creditors
   ipcMain.handle('creditors:list', (_, caseId) => {
     return db.prepare('SELECT * FROM creditors WHERE case_id = ? ORDER BY schedule, name').all(caseId);
@@ -399,6 +468,11 @@ function registerIPC() {
     return { id };
   });
 
+  ipcMain.handle('income:delete', (_, id) => {
+    db.prepare('DELETE FROM income WHERE id = ?').run(id);
+    return { success: true };
+  });
+
   // Expenses
   ipcMain.handle('expenses:upsert', (_, caseId, exp) => {
     const { v4: uuid } = require('uuid');
@@ -407,6 +481,11 @@ function registerIPC() {
       id, caseId, exp.category, exp.description || '', exp.monthlyAmount || 0
     );
     return { id };
+  });
+
+  ipcMain.handle('expenses:delete', (_, id) => {
+    db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+    return { success: true };
   });
 
   // Assets
@@ -446,11 +525,33 @@ function registerIPC() {
     return db.prepare('SELECT * FROM documents WHERE case_id = ? ORDER BY uploaded_at DESC').all(caseId);
   });
 
-  ipcMain.handle('documents:extract', (_, docId) => {
+  ipcMain.handle('documents:extract', async (_, docId) => {
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(docId);
     if (!doc) return null;
-    const extracted = mockExtract(doc.doc_type, doc.filename);
+
+    const categoryMap = {
+      'pay_stub': 'paystub',
+      'tax_return': 'tax_return',
+      'bank_statement': 'bank_statement',
+      'credit_report': 'other',
+      'other': 'other',
+    };
+    const category = categoryMap[doc.doc_type] || 'other';
+
+    let extracted;
+    try {
+      extracted = await extractWithClaude(doc.file_path, category);
+    } catch (err) {
+      console.error('Claude extraction failed, using mock:', err.message);
+      extracted = mockExtract(doc.doc_type, doc.filename);
+      extracted._mock = true;
+    }
+
     db.prepare('UPDATE documents SET extracted_data = ? WHERE id = ?').run(JSON.stringify(extracted), docId);
+
+    // Auto-populate case financial data from extraction
+    populateCaseFromExtraction(doc.case_id, doc.doc_type, extracted);
+
     return extracted;
   });
 

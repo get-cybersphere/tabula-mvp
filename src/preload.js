@@ -16,14 +16,22 @@ contextBridge.exposeInMainWorld('tabula', {
     upsert: (caseId, creditor) => ipcRenderer.invoke('creditors:upsert', caseId, creditor),
   },
 
+  // Debtors
+  debtors: {
+    upsert: (caseId, debtor) => ipcRenderer.invoke('debtors:upsert', caseId, debtor),
+    delete: (id) => ipcRenderer.invoke('debtors:delete', id),
+  },
+
   // Income
   income: {
     upsert: (caseId, income) => ipcRenderer.invoke('income:upsert', caseId, income),
+    delete: (id) => ipcRenderer.invoke('income:delete', id),
   },
 
   // Expenses
   expenses: {
     upsert: (caseId, expense) => ipcRenderer.invoke('expenses:upsert', caseId, expense),
+    delete: (id) => ipcRenderer.invoke('expenses:delete', id),
   },
 
   // Assets
