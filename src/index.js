@@ -167,13 +167,37 @@ function seedDemoData() {
   }
 }
 
-// ─── Means Test: Anthropic Extraction ────────────────────────
+// ─── Means Test: Anthropic Extraction (via LiteLLM proxy + local redaction) ──
 const Anthropic = require('@anthropic-ai/sdk').default;
+const { redactForExtraction, cleanup: redactionCleanup } = require('./main/redaction');
 
 function getAnthropicClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY environment variable is not set');
-  return new Anthropic({ apiKey });
+  // If LITELLM_BASE_URL is set, route through the proxy for audit logging
+  // and defense-in-depth PII masking. Otherwise call Anthropic directly.
+  const baseURL = process.env.LITELLM_BASE_URL || process.env.ANTHROPIC_BASE_URL;
+  const opts = { apiKey };
+  if (baseURL) opts.baseURL = baseURL;
+  return new Anthropic(opts);
+}
+
+// Look up debtor context for a document's case — used to detect debtor-specific PII
+function getDebtorContextForDoc(docId) {
+  const row = db.prepare(`
+    SELECT d.first_name, d.last_name, d.address_street, d.address_city
+    FROM documents doc
+    JOIN debtors d ON d.case_id = doc.case_id AND d.is_joint = 0
+    WHERE doc.id = ?
+    LIMIT 1
+  `).get(docId);
+  if (!row) return {};
+  return {
+    firstName: row.first_name,
+    lastName: row.last_name,
+    street: row.address_street,
+    city: row.address_city,
+  };
 }
 
 function getExtractionPrompt(docCategory) {
@@ -269,35 +293,53 @@ Extract all financial data you can find. Categorize the document and return stru
   }
 }
 
-async function extractWithClaude(filePath, docCategory) {
+async function extractWithClaude(filePath, docCategory, debtorContext = {}) {
   const client = getAnthropicClient();
-  const fileBuffer = fs.readFileSync(filePath);
-  const base64Data = fileBuffer.toString('base64');
-  const ext = path.extname(filePath).toLowerCase();
 
-  let mediaType = 'application/pdf';
-  if (['.png'].includes(ext)) mediaType = 'image/png';
-  else if (['.jpg', '.jpeg'].includes(ext)) mediaType = 'image/jpeg';
+  // Step 1: Local OCR + visual PII redaction.
+  // Produces a temporary file where SSNs, account numbers, DOBs, phones,
+  // emails, debtor names, and addresses are blacked out.
+  const { redactedPath, detections } = await redactForExtraction(filePath, debtorContext);
 
-  const isPdf = ext === '.pdf';
+  if (detections.length > 0) {
+    console.log(`[redaction] ${detections.length} PII region(s) redacted before API call:`,
+      detections.map(d => d.type).join(', '));
+  }
 
-  const content = [
-    isPdf
-      ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: base64Data } }
-      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
-    { type: 'text', text: getExtractionPrompt(docCategory) },
-  ];
+  try {
+    const fileBuffer = fs.readFileSync(redactedPath);
+    const base64Data = fileBuffer.toString('base64');
+    const ext = path.extname(redactedPath).toLowerCase();
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content }],
-  });
+    let mediaType = 'application/pdf';
+    if (ext === '.png') mediaType = 'image/png';
+    else if (['.jpg', '.jpeg'].includes(ext)) mediaType = 'image/jpeg';
 
-  const text = response.content.find(b => b.type === 'text')?.text || '{}';
-  // Strip markdown fences if present
-  const cleaned = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
-  return JSON.parse(cleaned);
+    const isPdf = ext === '.pdf';
+
+    const content = [
+      isPdf
+        ? { type: 'document', source: { type: 'base64', media_type: mediaType, data: base64Data } }
+        : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
+      { type: 'text', text: getExtractionPrompt(docCategory) },
+    ];
+
+    const response = await client.messages.create({
+      // When going through LiteLLM, this maps to the "tabula-extract" model in config.yaml
+      model: process.env.LITELLM_BASE_URL ? 'tabula-extract' : 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content }],
+    });
+
+    const text = response.content.find(b => b.type === 'text')?.text || '{}';
+    const cleaned = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
+    const parsed = JSON.parse(cleaned);
+    parsed._redactionCount = detections.length;
+    return parsed;
+  } finally {
+    // Always wipe the temp redacted file, even on error
+    redactionCleanup(redactedPath);
+  }
 }
 
 // ─── Auto-populate case data from extraction ─────────────────
@@ -538,9 +580,11 @@ function registerIPC() {
     };
     const category = categoryMap[doc.doc_type] || 'other';
 
+    const debtorContext = getDebtorContextForDoc(docId);
+
     let extracted;
     try {
-      extracted = await extractWithClaude(doc.file_path, category);
+      extracted = await extractWithClaude(doc.file_path, category, debtorContext);
     } catch (err) {
       console.error('Claude extraction failed, using mock:', err.message);
       extracted = mockExtract(doc.doc_type, doc.filename);
@@ -588,9 +632,11 @@ function registerIPC() {
     }));
   });
 
-  // Extract data from a single file using Claude
+  // Extract data from a single file using Claude (standalone means test, no case context)
   ipcMain.handle('means-test:extract', async (_, filePath, docCategory) => {
-    return extractWithClaude(filePath, docCategory);
+    // Standalone means test: no debtor context available, so debtor-specific PII
+    // (names, addresses) won't be redacted — only pattern-based PII (SSN, account, etc.)
+    return extractWithClaude(filePath, docCategory, {});
   });
 
   // Check if API key is configured
@@ -733,4 +779,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', async () => {
+  try {
+    const { shutdown } = require('./main/redaction');
+    await shutdown();
+  } catch {}
 });
