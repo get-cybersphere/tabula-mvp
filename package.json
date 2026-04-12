@@ -13,7 +13,8 @@
     "package": "npm run build:renderer && electron-forge package",
     "make": "npm run build:renderer && electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "echo \"No linting configured\""
+    "lint": "echo \"No linting configured\"",
+    "test": "node --test test/**/*.test.js"
   },
   "keywords": [],
   "author": {
