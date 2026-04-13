@@ -60,6 +60,7 @@ typings/
 # dotenv environment variables file
 .env
 .env.test
+litellm/.env
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -93,3 +94,5 @@ out/
 
 # esbuild output
 src/renderer/app.js
+
+*.traineddata

@@ -361,7 +361,7 @@ function ExtractionStep({ files, setDocuments, onNext, onBack }) {
 }
 
 // ─── Step 3: Review Dashboard ────────────────────────────────
-function ReviewStep({ documents, onBack }) {
+function ReviewStep({ documents, onBack, navigate }) {
   const aggregated = aggregateExtractedData(documents);
 
   const [state, setState] = useState('TX');
@@ -386,6 +386,10 @@ function ReviewStep({ documents, onBack }) {
   );
   const [priorityDebt, setPriorityDebt] = useState(0);
 
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveForm, setSaveForm] = useState({ firstName: '', lastName: '' });
+  const [saving, setSaving] = useState(false);
+
   // Run the means test reactively
   const meansResult = runMeansTest({
     incomeSources,
@@ -408,6 +412,42 @@ function ReviewStep({ documents, onBack }) {
 
   const updateExpense = (key, value) => {
     setExpenses(prev => ({ ...prev, [key]: parseFloat(value) || 0 }));
+  };
+
+  const handleSaveToCase = async () => {
+    if (!saveForm.firstName || !saveForm.lastName) return;
+    setSaving(true);
+    try {
+      const newCase = await window.tabula.cases.create({
+        chapter: meansResult.recommendation === 'chapter13' ? 13 : 7,
+        debtor: {
+          firstName: saveForm.firstName,
+          lastName: saveForm.lastName,
+        },
+      });
+      for (const src of incomeSources) {
+        await window.tabula.income.upsert(newCase.id, {
+          source: 'Employment',
+          employerName: src.employer,
+          grossMonthly: src.grossAmount,
+          netMonthly: src.grossAmount,
+          payFrequency: src.frequency,
+        });
+      }
+      for (const [category, amount] of Object.entries(expenses)) {
+        if (amount > 0) {
+          await window.tabula.expenses.upsert(newCase.id, {
+            category,
+            description: category.replace(/([A-Z])/g, ' $1').trim(),
+            monthlyAmount: amount,
+          });
+        }
+      }
+      navigate(`/cases/${newCase.id}`);
+    } catch (err) {
+      console.error('Failed to save case:', err);
+      setSaving(false);
+    }
   };
 
   const recTitle = meansResult.recommendation === 'chapter7'
@@ -740,15 +780,74 @@ function ReviewStep({ documents, onBack }) {
           </svg>
           Start Over
         </button>
-        <button className="btn btn-primary" onClick={() => exportSummary(meansResult, incomeSources, expenses, state, householdSize)}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Export Summary
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary" onClick={() => exportSummary(meansResult, incomeSources, expenses, state, householdSize)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export Summary
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowSaveModal(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+            Save to Case
+          </button>
+        </div>
       </div>
+
+      {/* Save to Case Modal */}
+      {showSaveModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ width: 400, margin: 0 }}>
+            <div className="card-header">
+              <span className="card-title">Save to Case</span>
+            </div>
+            <div className="card-body">
+              <p className="text-sm" style={{ color: 'var(--warm-gray)', marginBottom: 16 }}>
+                Enter the debtor's name to create a new case with this extracted data.
+              </p>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">First Name</label>
+                  <input
+                    className="form-input"
+                    autoFocus
+                    value={saveForm.firstName}
+                    onChange={e => setSaveForm(f => ({ ...f, firstName: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleSaveToCase()}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Last Name</label>
+                  <input
+                    className="form-input"
+                    value={saveForm.lastName}
+                    onChange={e => setSaveForm(f => ({ ...f, lastName: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && handleSaveToCase()}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button className="btn btn-secondary" onClick={() => setShowSaveModal(false)} disabled={saving}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleSaveToCase}
+                  disabled={saving || !saveForm.firstName || !saveForm.lastName}
+                >
+                  {saving ? 'Saving...' : 'Create Case'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -863,6 +962,7 @@ export default function MeansTest({ navigate }) {
         <ReviewStep
           documents={documents}
           onBack={() => { setStep(1); setFiles([]); setDocuments([]); }}
+          navigate={navigate}
         />
       )}
     </div>

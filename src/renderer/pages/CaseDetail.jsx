@@ -153,6 +153,33 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
   const monthlyIncome = (caseData.income || []).reduce((sum, i) => sum + (i.gross_monthly || 0), 0);
   const monthlyExpenses = (caseData.expenses || []).reduce((sum, e) => sum + (e.monthly_amount || 0), 0);
 
+  const [editingInfo, setEditingInfo] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [debtorForm, setDebtorForm] = useState({
+    firstName: debtor.first_name || '',
+    lastName: debtor.last_name || '',
+    ssn: debtor.ssn || '',
+    dob: debtor.dob || '',
+    phone: debtor.phone || '',
+    email: debtor.email || '',
+    street: debtor.address_street || '',
+    city: debtor.address_city || '',
+    state: debtor.address_state || '',
+    zip: debtor.address_zip || '',
+  });
+
+  const handleSaveInfo = async () => {
+    await window.tabula.debtors.upsert(caseId, { ...debtorForm, id: debtor.id, isJoint: false });
+    setEditingInfo(false);
+    onRefresh();
+  };
+
+  const handleSaveAddress = async () => {
+    await window.tabula.debtors.upsert(caseId, { ...debtorForm, id: debtor.id, isJoint: false });
+    setEditingAddress(false);
+    onRefresh();
+  };
+
   const jointDebtor = (caseData.debtors || []).find(d => d.is_joint === 1);
   const [showJointForm, setShowJointForm] = useState(false);
   const [jointForm, setJointForm] = useState({
@@ -200,23 +227,103 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="card">
-          <div className="card-header"><span className="card-title">Debtor Information</span></div>
+          <div className="card-header">
+            <span className="card-title">Debtor Information</span>
+            {!editingInfo && (
+              <button className="btn btn-sm btn-secondary" onClick={() => setEditingInfo(true)}>Edit</button>
+            )}
+          </div>
           <div className="card-body">
-            <InfoRow label="Name" value={`${debtor.first_name || ''} ${debtor.last_name || ''}`} />
-            <InfoRow label="SSN" value={debtor.ssn ? `***-**-${debtor.ssn.slice(-4)}` : '—'} />
-            <InfoRow label="Date of Birth" value={debtor.dob || '—'} />
-            <InfoRow label="Phone" value={debtor.phone || '—'} />
-            <InfoRow label="Email" value={debtor.email || '—'} />
+            {editingInfo ? (
+              <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">First Name</label>
+                    <input className="form-input" value={debtorForm.firstName} onChange={e => setDebtorForm(f => ({ ...f, firstName: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Last Name</label>
+                    <input className="form-input" value={debtorForm.lastName} onChange={e => setDebtorForm(f => ({ ...f, lastName: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">SSN</label>
+                    <input className="form-input" value={debtorForm.ssn} onChange={e => setDebtorForm(f => ({ ...f, ssn: e.target.value }))} placeholder="XXX-XX-XXXX" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Date of Birth</label>
+                    <input className="form-input" type="date" value={debtorForm.dob} onChange={e => setDebtorForm(f => ({ ...f, dob: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Phone</label>
+                    <input className="form-input" value={debtorForm.phone} onChange={e => setDebtorForm(f => ({ ...f, phone: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Email</label>
+                    <input className="form-input" value={debtorForm.email} onChange={e => setDebtorForm(f => ({ ...f, email: e.target.value }))} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setEditingInfo(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" onClick={handleSaveInfo}>Save</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <InfoRow label="Name" value={`${debtor.first_name || ''} ${debtor.last_name || ''}`} />
+                <InfoRow label="SSN" value={debtor.ssn ? `***-**-${debtor.ssn.slice(-4)}` : '—'} />
+                <InfoRow label="Date of Birth" value={debtor.dob || '—'} />
+                <InfoRow label="Phone" value={debtor.phone || '—'} />
+                <InfoRow label="Email" value={debtor.email || '—'} />
+              </>
+            )}
           </div>
         </div>
 
         <div className="card">
-          <div className="card-header"><span className="card-title">Address</span></div>
+          <div className="card-header">
+            <span className="card-title">Address</span>
+            {!editingAddress && (
+              <button className="btn btn-sm btn-secondary" onClick={() => setEditingAddress(true)}>Edit</button>
+            )}
+          </div>
           <div className="card-body">
-            <InfoRow label="Street" value={debtor.address_street || '—'} />
-            <InfoRow label="City" value={debtor.address_city || '—'} />
-            <InfoRow label="State" value={debtor.address_state || '—'} />
-            <InfoRow label="ZIP" value={debtor.address_zip || '—'} />
+            {editingAddress ? (
+              <>
+                <div className="form-group">
+                  <label className="form-label">Street</label>
+                  <input className="form-input" value={debtorForm.street} onChange={e => setDebtorForm(f => ({ ...f, street: e.target.value }))} />
+                </div>
+                <div className="form-row-3">
+                  <div className="form-group">
+                    <label className="form-label">City</label>
+                    <input className="form-input" value={debtorForm.city} onChange={e => setDebtorForm(f => ({ ...f, city: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">State</label>
+                    <input className="form-input" value={debtorForm.state} onChange={e => setDebtorForm(f => ({ ...f, state: e.target.value.toUpperCase() }))} placeholder="TX" maxLength="2" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">ZIP</label>
+                    <input className="form-input" value={debtorForm.zip} onChange={e => setDebtorForm(f => ({ ...f, zip: e.target.value }))} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setEditingAddress(false)}>Cancel</button>
+                  <button className="btn btn-primary btn-sm" onClick={handleSaveAddress}>Save</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <InfoRow label="Street" value={debtor.address_street || '—'} />
+                <InfoRow label="City" value={debtor.address_city || '—'} />
+                <InfoRow label="State" value={debtor.address_state || '—'} />
+                <InfoRow label="ZIP" value={debtor.address_zip || '—'} />
+              </>
+            )}
           </div>
         </div>
       </div>
