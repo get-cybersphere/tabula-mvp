@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { runMeansTest } from '../lib/means-test.js';
 import { getAllStates } from '../lib/median-income.js';
+import { computeCompleteness } from '../lib/case-completeness.js';
+import { computeDeadlines } from '../lib/deadlines.js';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -12,6 +14,7 @@ const STATUS_LABELS = {
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
+  { key: 'timeline', label: 'Timeline' },
   { key: 'documents', label: 'Documents' },
   { key: 'assets', label: 'Assets' },
   { key: 'creditors', label: 'Creditors' },
@@ -141,6 +144,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
 
       {/* Tab Content */}
       {activeTab === 'overview' && <OverviewTab caseData={caseData} debtor={debtor} caseId={caseId} onRefresh={loadCase} />}
+      {activeTab === 'timeline' && <TimelineTab caseId={caseId} />}
       {activeTab === 'documents' && <DocumentsTab caseData={caseData} onUpload={handleUploadDocuments} onExtract={handleExtract} />}
       {activeTab === 'assets' && <AssetsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
       {activeTab === 'creditors' && <CreditorsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
@@ -422,17 +426,114 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 20 }}>
-        <div className="card-header"><span className="card-title">Petition Checklist</span></div>
-        <div className="card-body">
-          <ChecklistItem done={!!debtor.first_name} label="Debtor information" />
-          <ChecklistItem done={(caseData.income || []).length > 0} label="Income sources" />
-          <ChecklistItem done={(caseData.expenses || []).length > 0} label="Monthly expenses" />
-          <ChecklistItem done={(caseData.income || []).length > 0 && (caseData.expenses || []).length > 0} label="Means test run" />
-          <ChecklistItem done={(caseData.creditors || []).length > 0} label="Creditor matrix" />
-          <ChecklistItem done={(caseData.assets || []).length > 0} label="Asset schedules" />
-          <ChecklistItem done={(caseData.documents || []).length > 0} label="Supporting documents" />
-          <ChecklistItem done={(caseData.flags || []).filter(f => !f.resolved).length === 0 && (caseData.flags || []).length > 0} label="All review flags resolved" />
+      <DeadlinesCard caseData={caseData} />
+
+      <CompletenessPanel caseData={caseData} />
+    </div>
+  );
+}
+
+/**
+ * Detailed completeness panel — shows score, what's done, and what's missing
+ * with specific hints. Drives the "what's missing per client" pain point.
+ */
+function CompletenessPanel({ caseData }) {
+  const completeness = computeCompleteness(caseData);
+  const { score, readyToFile, items, missing, completedItems, totalItems } = completeness;
+
+  const barColor =
+    readyToFile ? 'var(--sage)' :
+    score >= 75 ? 'var(--amber)' :
+    score >= 40 ? 'var(--blue)' :
+    'var(--accent)';
+
+  return (
+    <div className="card" style={{ marginTop: 20 }}>
+      <div className="card-header">
+        <span className="card-title">Petition Readiness</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="text-sm" style={{ color: 'var(--warm-gray)' }}>
+            {completedItems} of {totalItems} complete
+          </span>
+          <span style={{
+            fontFamily: 'var(--mono)', fontWeight: 600, fontSize: '0.95rem',
+            color: barColor,
+          }}>
+            {score}%
+          </span>
+          {readyToFile && (
+            <span className="badge ready">Ready to File</span>
+          )}
+        </div>
+      </div>
+      <div className="card-body">
+        {/* Progress bar */}
+        <div style={{
+          height: 6, borderRadius: 3, background: 'rgba(10,10,10,0.06)',
+          overflow: 'hidden', marginBottom: 20,
+        }}>
+          <div style={{
+            width: `${score}%`, height: '100%', background: barColor,
+            transition: 'width 200ms ease-out',
+          }} />
+        </div>
+
+        {/* What's missing — highlighted */}
+        {missing.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div className="text-sm" style={{ fontWeight: 600, marginBottom: 10, color: 'var(--accent)' }}>
+              Missing ({missing.length})
+            </div>
+            {missing.map((m) => (
+              <div key={m.key} style={{
+                display: 'flex', gap: 10, padding: '8px 12px',
+                background: 'rgba(196, 124, 72, 0.06)',
+                borderLeft: '3px solid var(--accent)',
+                borderRadius: 4, marginBottom: 6,
+              }}>
+                <span style={{ color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>!</span>
+                <div>
+                  <div className="text-sm" style={{ fontWeight: 500 }}>{m.label}</div>
+                  {m.hint && (
+                    <div className="text-xs" style={{ color: 'var(--warm-gray)', marginTop: 2 }}>
+                      {m.hint}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Full checklist — compact */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 20px' }}>
+          {items.map((item) => (
+            <div key={item.key} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0',
+              opacity: item.done ? 1 : (item.required ? 0.85 : 0.55),
+            }}>
+              <div style={{
+                width: 16, height: 16, borderRadius: '50%',
+                border: item.done ? 'none' : '1.5px solid rgba(10,10,10,0.18)',
+                background: item.done ? 'var(--sage)' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}>
+                {item.done && (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </div>
+              <span className="text-sm" style={{ color: item.done ? 'var(--ink)' : 'var(--warm-gray)' }}>
+                {item.label}
+              </span>
+              {!item.required && !item.done && (
+                <span className="text-xs" style={{ color: 'var(--warm-gray)', opacity: 0.6 }}>
+                  optional
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -1246,6 +1347,159 @@ function ReviewTab({ caseData, caseId, onRefresh }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── Timeline Tab ─────────────────────────────────────────── */
+
+function TimelineTab({ caseId }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    window.tabula.events.list(caseId).then(evs => {
+      if (!cancelled) {
+        setEvents(evs || []);
+        setLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [caseId]);
+
+  if (loading) return <p className="text-sm text-muted">Loading timeline...</p>;
+  if (events.length === 0) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <h3>No timeline events yet</h3>
+          <p>Events appear here as you upload documents, extract data, add creditors, and change case status.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="card-body" style={{ padding: '20px 24px' }}>
+        {events.map((ev, i) => (
+          <TimelineEvent key={ev.id} event={ev} isLast={i === events.length - 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TimelineEvent({ event, isLast }) {
+  const color = eventColor(event.event_type);
+  return (
+    <div style={{ display: 'flex', gap: 14, position: 'relative' }}>
+      <div style={{ position: 'relative', flexShrink: 0, width: 16 }}>
+        <div style={{
+          width: 12, height: 12, borderRadius: '50%',
+          background: color, marginTop: 5,
+          border: '2px solid var(--paper)',
+          boxShadow: `0 0 0 1.5px ${color}`,
+          position: 'relative', zIndex: 1,
+        }} />
+        {!isLast && (
+          <div style={{
+            position: 'absolute', left: 6, top: 17, bottom: -14,
+            width: 1, background: 'rgba(10,10,10,0.08)',
+          }} />
+        )}
+      </div>
+      <div style={{ flex: 1, paddingBottom: isLast ? 0 : 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+          <div className="text-sm" style={{ fontWeight: 500 }}>{event.description}</div>
+          <div className="text-xs text-muted" style={{ flexShrink: 0, fontFamily: 'var(--mono)' }}>
+            {formatDistanceToNow(new Date(event.occurred_at), { addSuffix: true })}
+          </div>
+        </div>
+        <div className="text-xs" style={{ color: 'var(--warm-gray)', marginTop: 2 }}>
+          {event.event_type.replace(/_/g, ' ')}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function eventColor(eventType) {
+  if (eventType === 'case_filed') return 'var(--accent)';
+  if (eventType.startsWith('document_')) return 'var(--blue)';
+  if (eventType.endsWith('_added')) return 'var(--sage)';
+  if (eventType === 'status_changed') return 'var(--amber)';
+  if (eventType.includes('review_flag')) return 'var(--accent)';
+  return 'var(--warm-gray)';
+}
+
+/* ─── Deadlines Card (rendered inside Overview) ────────────── */
+
+function DeadlinesCard({ caseData }) {
+  const deadlines = computeDeadlines(caseData);
+  if (deadlines.length === 0) return null;
+  const active = deadlines.filter(d => d.status !== 'past' && d.status !== 'completed');
+  if (active.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginTop: 20 }}>
+      <div className="card-header">
+        <span className="card-title">Upcoming Deadlines</span>
+        <span className="text-xs text-muted">{active.length} statutory deadline{active.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="card-body" style={{ padding: 0 }}>
+        {active.map((d, i) => (
+          <DeadlineRow key={d.key} deadline={d} isLast={i === active.length - 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DeadlineRow({ deadline, isLast }) {
+  const { label, date, rangeEnd, daysFromNow, status, severity, description } = deadline;
+  const accent =
+    status === 'overdue' ? 'var(--accent)' :
+    severity === 'critical' && daysFromNow <= 14 ? 'var(--accent)' :
+    severity === 'critical' ? 'var(--amber)' :
+    severity === 'high' ? 'var(--amber)' :
+    severity === 'medium' ? 'var(--blue)' :
+    'var(--warm-gray)';
+
+  const dateText = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const rangeText = rangeEnd
+    ? ` – ${new Date(rangeEnd).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+    : '';
+
+  const relativeText =
+    status === 'overdue' ? `${Math.abs(daysFromNow)} day${Math.abs(daysFromNow) === 1 ? '' : 's'} overdue` :
+    daysFromNow === 0 ? 'Today' :
+    daysFromNow < 0 ? `${Math.abs(daysFromNow)} days ago` :
+    `in ${daysFromNow} day${daysFromNow === 1 ? '' : 's'}`;
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 14,
+      padding: '12px 24px',
+      borderBottom: isLast ? 'none' : '1px solid rgba(10,10,10,0.04)',
+      borderLeft: `3px solid ${accent}`,
+    }}>
+      <div style={{ flex: 1 }}>
+        <div className="text-sm" style={{ fontWeight: 500 }}>{label}</div>
+        <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+          {description}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div className="text-sm" style={{ fontFamily: 'var(--mono)', fontWeight: 500 }}>
+          {dateText}{rangeText}
+        </div>
+        <div className="text-xs" style={{ color: accent, fontWeight: 500, marginTop: 2 }}>
+          {relativeText}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { computeUpcomingDeadlines } from '../lib/deadlines.js';
 
 const STATUS_LABELS = {
   all: 'All Cases',
@@ -16,19 +17,64 @@ const SearchIcon = () => (
   </svg>
 );
 
+/** Pill showing completeness percentage + missing-items badge. */
+function CompletenessChip({ score, missingCount, readyToFile }) {
+  // Color progression: red → amber → sage as we approach 100%
+  const color =
+    readyToFile ? 'var(--sage)' :
+    score >= 75 ? 'var(--amber)' :
+    score >= 40 ? 'var(--blue)' :
+    'var(--accent)';
+  const bg =
+    readyToFile ? 'rgba(106, 138, 100, 0.12)' :
+    score >= 75 ? 'rgba(204, 153, 51, 0.12)' :
+    score >= 40 ? 'rgba(66, 99, 140, 0.10)' :
+    'rgba(196, 124, 72, 0.10)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '3px 10px', borderRadius: 12,
+        background: bg, color,
+        fontSize: '0.78rem', fontWeight: 600, fontFamily: 'var(--mono)',
+      }}>
+        {score}%
+      </div>
+      {missingCount > 0 && (
+        <span className="text-xs" style={{ color: 'var(--warm-gray)' }}>
+          {missingCount} missing
+        </span>
+      )}
+      {readyToFile && (
+        <span className="text-xs" style={{ color: 'var(--sage)', fontWeight: 500 }}>
+          ready
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard({ navigate }) {
   const [cases, setCases] = useState([]);
   const [stats, setStats] = useState({ total: 0, intake: 0, inProgress: 0, ready: 0, filed: 0 });
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
 
+  const [recentEvents, setRecentEvents] = useState([]);
+  const [allCases, setAllCases] = useState([]);
+
   const loadData = useCallback(async () => {
-    const [caseList, overview] = await Promise.all([
+    // Load all cases (for deadlines) + filtered cases (for the table) + stats + recent activity.
+    const [caseList, overview, allCaseList, events] = await Promise.all([
       window.tabula.cases.list({ status: statusFilter, search }),
       window.tabula.stats.overview(),
+      window.tabula.cases.list({ status: 'all', search: '' }),
+      window.tabula.events.recent(12),
     ]);
     setCases(caseList);
     setStats(overview);
+    setAllCases(allCaseList);
+    setRecentEvents(events || []);
   }, [statusFilter, search]);
 
   useEffect(() => {
@@ -79,6 +125,10 @@ export default function Dashboard({ navigate }) {
         </div>
       </div>
 
+      {/* Firm-wide deadlines + recent activity row */}
+      <DashboardInsights cases={allCases} events={recentEvents} navigate={navigate} />
+
+
       {/* Filters */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div className="filter-pills">
@@ -114,6 +164,7 @@ export default function Dashboard({ navigate }) {
                 <th>Chapter</th>
                 <th>District</th>
                 <th>Status</th>
+                <th>Completeness</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -132,6 +183,13 @@ export default function Dashboard({ navigate }) {
                     <span className={`badge ${c.status}`}>
                       {STATUS_LABELS[c.status] || c.status}
                     </span>
+                  </td>
+                  <td>
+                    <CompletenessChip
+                      score={c.completeness || 0}
+                      missingCount={c.missing_count || 0}
+                      readyToFile={!!c.ready_to_file}
+                    />
                   </td>
                   <td className="text-sm text-muted">{formatDate(c.created_at)}</td>
                 </tr>
@@ -156,3 +214,99 @@ export default function Dashboard({ navigate }) {
     </div>
   );
 }
+
+/** Two-column panel: upcoming deadlines + recent activity across the firm. */
+function DashboardInsights({ cases, events, navigate }) {
+  const upcoming = computeUpcomingDeadlines(cases || [], undefined, 8);
+  if (upcoming.length === 0 && events.length === 0) return null;
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 20, marginBottom: 24 }}>
+      {/* Deadlines */}
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Upcoming Deadlines</span>
+          <span className="text-xs text-muted">across all filed cases</span>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          {upcoming.length === 0 ? (
+            <p className="text-sm text-muted" style={{ padding: 20 }}>
+              No upcoming statutory deadlines. Deadlines appear after a case is filed.
+            </p>
+          ) : (
+            upcoming.map((d, i) => (
+              <div
+                key={`${d.case_id}-${d.key}`}
+                onClick={() => navigate(`/cases/${d.case_id}`)}
+                style={{
+                  display: 'flex', gap: 14, alignItems: 'center',
+                  padding: '10px 22px',
+                  borderBottom: i === upcoming.length - 1 ? 'none' : '1px solid rgba(10,10,10,0.04)',
+                  borderLeft: `3px solid ${deadlineColor(d)}`,
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div className="text-sm" style={{ fontWeight: 500 }}>{d.label}</div>
+                  <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                    {d.debtor_name} · Ch. {d.chapter}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div className="text-sm" style={{ fontFamily: 'var(--mono)' }}>
+                    {new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </div>
+                  <div className="text-xs" style={{ color: deadlineColor(d), fontWeight: 500 }}>
+                    {d.status === 'overdue'
+                      ? `${Math.abs(d.daysFromNow)}d overdue`
+                      : d.daysFromNow === 0 ? 'today' : `in ${d.daysFromNow}d`}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Recent activity */}
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Recent Activity</span>
+        </div>
+        <div className="card-body" style={{ padding: 0, maxHeight: 360, overflowY: 'auto' }}>
+          {events.length === 0 ? (
+            <p className="text-sm text-muted" style={{ padding: 20 }}>
+              Upload documents or update cases to see activity here.
+            </p>
+          ) : (
+            events.map((ev, i) => (
+              <div
+                key={ev.id}
+                onClick={() => navigate(`/cases/${ev.case_id}`)}
+                style={{
+                  padding: '10px 22px',
+                  borderBottom: i === events.length - 1 ? 'none' : '1px solid rgba(10,10,10,0.04)',
+                  cursor: 'pointer',
+                }}
+              >
+                <div className="text-sm" style={{ fontWeight: 500 }}>{ev.description}</div>
+                <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                  {[ev.first_name, ev.last_name].filter(Boolean).join(' ')} · {formatDistanceToNow(new Date(ev.occurred_at), { addSuffix: true })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function deadlineColor(d) {
+  if (d.status === 'overdue') return 'var(--accent)';
+  if (d.severity === 'critical' && d.daysFromNow <= 14) return 'var(--accent)';
+  if (d.severity === 'critical' || d.severity === 'high') return 'var(--amber)';
+  if (d.severity === 'medium') return 'var(--blue)';
+  return 'var(--warm-gray)';
+}
+

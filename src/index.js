@@ -132,9 +132,52 @@ function initDatabase() {
       resolved INTEGER DEFAULT 0,
       created_at TEXT NOT NULL
     );
+
+    -- Every meaningful state change on a case becomes a timeline event.
+    -- Drives the "what happened when" per-case view and the firm-wide
+    -- recent activity feed. metadata is a JSON blob, type-specific.
+    CREATE TABLE IF NOT EXISTS case_events (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      description TEXT NOT NULL,
+      metadata TEXT,
+      occurred_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_case_events_case_time
+      ON case_events(case_id, occurred_at DESC);
   `);
 
+  // Lightweight migration for the filing date. Must be out-of-exec because
+  // SQLite doesn't support IF NOT EXISTS on ADD COLUMN.
+  const caseCols = db.prepare("PRAGMA table_info(cases)").all().map(c => c.name);
+  if (!caseCols.includes('filed_at')) {
+    db.prepare("ALTER TABLE cases ADD COLUMN filed_at TEXT").run();
+  }
+
   seedDemoData();
+}
+
+// ─── Timeline event helper ───────────────────────────────────
+// Centralized event writer so every mutation uses the same shape and we
+// can audit/change the event stream in one place.
+function logCaseEvent(caseId, eventType, description, metadata = null, occurredAt = null) {
+  if (!db || !caseId) return;
+  const { v4: uuid } = require('uuid');
+  const now = new Date().toISOString();
+  try {
+    db.prepare(`
+      INSERT INTO case_events (id, case_id, event_type, description, metadata, occurred_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      uuid(), caseId, eventType, description,
+      metadata ? JSON.stringify(metadata) : null,
+      occurredAt || now, now
+    );
+  } catch (err) {
+    console.error('[timeline] failed to log event:', eventType, err.message);
+  }
 }
 
 function seedDemoData() {
@@ -143,27 +186,101 @@ function seedDemoData() {
 
   const { v4: uuid } = require('uuid');
   const now = new Date().toISOString();
+  const today = new Date();
+  const daysAgo = (n) => new Date(today.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
 
+  // Demo cases with varied filing states so deadlines/timeline have data to show.
+  // "James Thompson" is fleshed out as the demo narrative — filed 10 days ago,
+  // 341 meeting scheduled, full financial picture — so the demo attorney can
+  // click in and see the entire readiness + deadline + timeline story.
   const cases = [
-    { id: uuid(), status: 'intake', chapter: 7, district: 'E.D. Texas', name: ['Marcus', 'Johnson'], created: '2026-04-01' },
-    { id: uuid(), status: 'in_progress', chapter: 7, district: 'S.D. Florida', name: ['Sarah', 'Chen'], created: '2026-03-28' },
-    { id: uuid(), status: 'in_progress', chapter: 13, district: 'N.D. Ohio', name: ['Robert', 'Williams'], created: '2026-03-25' },
-    { id: uuid(), status: 'ready', chapter: 7, district: 'W.D. Washington', name: ['Maria', 'Garcia'], created: '2026-03-20' },
-    { id: uuid(), status: 'filed', chapter: 7, district: 'C.D. California', name: ['James', 'Thompson'], created: '2026-03-10' },
-    { id: uuid(), status: 'intake', chapter: 7, district: 'M.D. Tennessee', name: ['Linda', 'Davis'], created: '2026-04-05' },
-    { id: uuid(), status: 'in_progress', chapter: 7, district: 'E.D. Texas', name: ['David', 'Martinez'], created: '2026-03-30' },
+    { id: uuid(), status: 'intake', chapter: 7, district: 'E.D. Texas', name: ['Marcus', 'Johnson'], created: daysAgo(12) },
+    { id: uuid(), status: 'in_progress', chapter: 7, district: 'S.D. Florida', name: ['Sarah', 'Chen'], created: daysAgo(16) },
+    { id: uuid(), status: 'in_progress', chapter: 13, district: 'N.D. Ohio', name: ['Robert', 'Williams'], created: daysAgo(19), filed_at: daysAgo(5) },
+    { id: uuid(), status: 'ready', chapter: 7, district: 'W.D. Washington', name: ['Maria', 'Garcia'], created: daysAgo(24) },
+    { id: uuid(), status: 'filed', chapter: 7, district: 'C.D. California', name: ['James', 'Thompson'], created: daysAgo(34), filed_at: daysAgo(10), rich: true },
+    { id: uuid(), status: 'intake', chapter: 7, district: 'M.D. Tennessee', name: ['Linda', 'Davis'], created: daysAgo(8) },
+    { id: uuid(), status: 'in_progress', chapter: 7, district: 'E.D. Texas', name: ['David', 'Martinez'], created: daysAgo(14) },
   ];
 
-  const insertCase = db.prepare('INSERT INTO cases (id, status, chapter, district, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
-  const insertDebtor = db.prepare('INSERT INTO debtors (id, case_id, first_name, last_name, address_state, address_city) VALUES (?, ?, ?, ?, ?, ?)');
+  const insertCase = db.prepare(
+    'INSERT INTO cases (id, status, chapter, district, filed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  );
+  const insertDebtor = db.prepare(
+    'INSERT INTO debtors (id, case_id, first_name, last_name, ssn, dob, address_street, address_city, address_state, address_zip, phone, email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
 
   const states = { 'E.D. Texas': 'TX', 'S.D. Florida': 'FL', 'N.D. Ohio': 'OH', 'W.D. Washington': 'WA', 'C.D. California': 'CA', 'M.D. Tennessee': 'TN' };
   const cities = { TX: 'Houston', FL: 'Miami', OH: 'Cleveland', WA: 'Seattle', CA: 'Los Angeles', TN: 'Nashville' };
 
   for (const c of cases) {
     const st = states[c.district] || 'TX';
-    insertCase.run(c.id, c.status, c.chapter, c.district, c.created + 'T00:00:00Z', now);
-    insertDebtor.run(uuid(), c.id, c.name[0], c.name[1], st, cities[st] || 'Dallas');
+    insertCase.run(c.id, c.status, c.chapter, c.district, c.filed_at || null, c.created, now);
+    insertDebtor.run(
+      uuid(), c.id, c.name[0], c.name[1],
+      '123-45-6789', '1985-04-15',
+      `${100 + Math.floor(Math.random() * 900)} Main St`,
+      cities[st] || 'Dallas', st, '78701',
+      '(512) 555-0100', `${c.name[0].toLowerCase()}@example.com`
+    );
+
+    // Log a baseline case_created timeline event so every seed case has at
+    // least one event (relative to its created_at date).
+    logCaseEvent(c.id, 'case_created', `Case created for ${c.name[0]} ${c.name[1]}`,
+      { chapter: c.chapter, district: c.district }, c.created);
+
+    if (c.filed_at) {
+      logCaseEvent(c.id, 'case_filed', 'Petition filed', { filed_at: c.filed_at }, c.filed_at);
+    }
+
+    // Rich demo case: populate income/expenses/creditors + a fuller event stream.
+    if (c.rich) {
+      const incomeId = uuid();
+      db.prepare('INSERT INTO income (id, case_id, source, employer_name, gross_monthly, net_monthly, pay_frequency) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        incomeId, c.id, 'Employment', 'Acme Industries LLC', 4567.00, 3038.50, 'biweekly'
+      );
+      logCaseEvent(c.id, 'income_added', 'Income added: Acme Industries LLC ($4,567/mo gross)',
+        { income_id: incomeId, gross_monthly: 4567 }, daysAgo(28));
+
+      for (const e of [
+        ['rent', 'Rent / Mortgage', 1450],
+        ['utilities', 'Electric, water, gas', 187],
+        ['food', 'Groceries', 412],
+        ['transportation', 'Gas', 156],
+        ['insurance', 'Auto + health insurance', 225],
+      ]) {
+        const eid = uuid();
+        db.prepare('INSERT INTO expenses (id, case_id, category, description, monthly_amount) VALUES (?, ?, ?, ?, ?)').run(
+          eid, c.id, e[0], e[1], e[2]
+        );
+      }
+      logCaseEvent(c.id, 'expense_added', 'Expenses populated from bank statement (5 categories)',
+        { source: 'extraction' }, daysAgo(26));
+
+      for (const cr of [
+        { name: 'Capital One', amt: 4230, type: 'credit_card', sch: 'F' },
+        { name: 'Discover Financial', amt: 7845, type: 'credit_card', sch: 'F' },
+        { name: 'Wells Fargo Auto', amt: 12400, type: 'auto_loan', sch: 'D' },
+        { name: 'Navient', amt: 24500, type: 'student_loan', sch: 'E' },
+      ]) {
+        const crid = uuid();
+        db.prepare('INSERT INTO creditors (id, case_id, name, debt_type, schedule, amount_claimed) VALUES (?, ?, ?, ?, ?, ?)').run(
+          crid, c.id, cr.name, cr.type, cr.sch, cr.amt
+        );
+        logCaseEvent(c.id, 'creditor_added', `Creditor added: ${cr.name} ($${cr.amt.toLocaleString()})`,
+          { creditor_id: crid, amount: cr.amt, schedule: cr.sch }, daysAgo(25));
+      }
+
+      // A couple of fake document events to make the timeline feel alive
+      logCaseEvent(c.id, 'document_uploaded', 'Uploaded march_paystub.pdf (pay stub)',
+        { doc_type: 'pay_stub' }, daysAgo(29));
+      logCaseEvent(c.id, 'document_extracted', 'Extracted march_paystub.pdf',
+        { mock: false, redaction_count: 4 }, daysAgo(29));
+      logCaseEvent(c.id, 'document_uploaded', 'Uploaded chase_statement_mar.pdf (bank statement)',
+        { doc_type: 'bank_statement' }, daysAgo(27));
+      logCaseEvent(c.id, 'document_extracted', 'Extracted chase_statement_mar.pdf',
+        { mock: false, redaction_count: 6 }, daysAgo(27));
+    }
   }
 }
 
@@ -397,8 +514,23 @@ function populateCaseFromExtraction(caseId, docType, extracted) {
 function registerIPC() {
   // Cases
   ipcMain.handle('cases:list', (_, filters) => {
+    // Pull all fields needed for completeness scoring in a single query.
+    // Correlated subqueries keep this O(N_cases) — fine for a practice of
+    // hundreds of cases, and avoids N+1 round-trips from the renderer.
     let query = `
-      SELECT c.*, d.first_name, d.last_name, d.address_state
+      SELECT
+        c.*,
+        d.id as debtor_id,
+        d.first_name, d.last_name, d.ssn, d.dob,
+        d.address_street, d.address_city, d.address_state, d.address_zip,
+        (SELECT COUNT(*) FROM income     WHERE case_id = c.id) AS income_count,
+        (SELECT COUNT(*) FROM expenses   WHERE case_id = c.id) AS expense_count,
+        (SELECT COUNT(*) FROM creditors  WHERE case_id = c.id) AS creditor_count,
+        (SELECT COUNT(*) FROM assets     WHERE case_id = c.id) AS asset_count,
+        (SELECT COUNT(*) FROM documents  WHERE case_id = c.id) AS doc_count,
+        (SELECT GROUP_CONCAT(DISTINCT doc_type) FROM documents WHERE case_id = c.id) AS doc_types,
+        (SELECT COUNT(*) FROM review_flags WHERE case_id = c.id AND resolved = 0) AS open_flags,
+        (SELECT COUNT(*) FROM review_flags WHERE case_id = c.id) AS total_flags
       FROM cases c
       LEFT JOIN debtors d ON d.case_id = c.id AND d.is_joint = 0
     `;
@@ -414,7 +546,46 @@ function registerIPC() {
     }
     if (conditions.length) query += ' WHERE ' + conditions.join(' AND ');
     query += ' ORDER BY c.created_at DESC';
-    return db.prepare(query).all(...params);
+
+    const { computeCompleteness } = require('./renderer/lib/case-completeness');
+    const rows = db.prepare(query).all(...params);
+
+    // Enrich each row with a completeness score derived from the pure
+    // computeCompleteness() function so dashboard, case detail, and any
+    // future consumer all see the same score.
+    return rows.map(row => {
+      const docTypes = row.doc_types ? row.doc_types.split(',') : [];
+      const stubCase = {
+        chapter: row.chapter,
+        debtors: row.debtor_id ? [{
+          is_joint: 0,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          ssn: row.ssn,
+          dob: row.dob,
+          address_street: row.address_street,
+          address_city: row.address_city,
+          address_state: row.address_state,
+          address_zip: row.address_zip,
+        }] : [],
+        income:    new Array(row.income_count || 0).fill({}),
+        expenses:  new Array(row.expense_count || 0).fill({}),
+        creditors: new Array(row.creditor_count || 0).fill({}),
+        assets:    new Array(row.asset_count || 0).fill({}),
+        documents: docTypes.map(t => ({ doc_type: t })),
+        flags: [
+          ...new Array(row.open_flags || 0).fill({ resolved: 0 }),
+          ...new Array((row.total_flags || 0) - (row.open_flags || 0)).fill({ resolved: 1 }),
+        ],
+      };
+      const completeness = computeCompleteness(stubCase);
+      return {
+        ...row,
+        completeness: completeness.score,
+        ready_to_file: completeness.readyToFile,
+        missing_count: completeness.missing.length,
+      };
+    });
   });
 
   ipcMain.handle('cases:get', (_, id) => {
@@ -442,11 +613,19 @@ function registerIPC() {
         data.debtor.phone || '', data.debtor.email || ''
       );
     }
+    const debtorName = data.debtor ? `${data.debtor.firstName || ''} ${data.debtor.lastName || ''}`.trim() : 'New case';
+    logCaseEvent(id, 'case_created', `Case created for ${debtorName || 'new debtor'}`, {
+      chapter: data.chapter || 7,
+      district: data.district,
+    });
     return { id };
   });
 
   ipcMain.handle('cases:update', (_, id, data) => {
     const now = new Date().toISOString();
+    // Snapshot the current row so we know what changed for the timeline event.
+    const prior = db.prepare('SELECT status, chapter, district FROM cases WHERE id = ?').get(id);
+
     const fields = [];
     const params = [];
     for (const [key, value] of Object.entries(data)) {
@@ -455,10 +634,29 @@ function registerIPC() {
         params.push(value);
       }
     }
+    // Set filed_at automatically when transitioning to 'filed' status.
+    if (data.status === 'filed' && prior && prior.status !== 'filed') {
+      fields.push('filed_at = ?');
+      params.push(now);
+    }
     fields.push('updated_at = ?');
     params.push(now);
     params.push(id);
     db.prepare(`UPDATE cases SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+
+    // Timeline: record status transitions separately from other updates so
+    // downstream consumers (dashboard "recent activity", deadline engine)
+    // can filter on the event_type cleanly.
+    if (data.status && prior && prior.status !== data.status) {
+      if (data.status === 'filed') {
+        logCaseEvent(id, 'case_filed', 'Petition filed', { filed_at: now });
+      } else {
+        logCaseEvent(id, 'status_changed',
+          `Status changed: ${prior.status} → ${data.status}`,
+          { from: prior.status, to: data.status }
+        );
+      }
+    }
     return { success: true };
   });
 
@@ -493,10 +691,17 @@ function registerIPC() {
   ipcMain.handle('creditors:upsert', (_, caseId, creditor) => {
     const { v4: uuid } = require('uuid');
     const id = creditor.id || uuid();
+    const isNew = !creditor.id;
     db.prepare(`INSERT OR REPLACE INTO creditors (id, case_id, name, address, account_number, debt_type, schedule, amount_claimed, collateral_description, is_disputed, is_contingent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       id, caseId, creditor.name, creditor.address || '', creditor.accountNumber || '', creditor.debtType, creditor.schedule,
       creditor.amountClaimed || 0, creditor.collateralDescription || '', creditor.isDisputed ? 1 : 0, creditor.isContingent ? 1 : 0
     );
+    if (isNew) {
+      logCaseEvent(caseId, 'creditor_added',
+        `Creditor added: ${creditor.name} ($${(creditor.amountClaimed || 0).toLocaleString()})`,
+        { creditor_id: id, amount: creditor.amountClaimed || 0, schedule: creditor.schedule }
+      );
+    }
     return { id };
   });
 
@@ -504,9 +709,16 @@ function registerIPC() {
   ipcMain.handle('income:upsert', (_, caseId, inc) => {
     const { v4: uuid } = require('uuid');
     const id = inc.id || uuid();
+    const isNew = !inc.id;
     db.prepare('INSERT OR REPLACE INTO income (id, case_id, source, employer_name, gross_monthly, net_monthly, pay_frequency) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       id, caseId, inc.source, inc.employerName || '', inc.grossMonthly || 0, inc.netMonthly || 0, inc.payFrequency || 'monthly'
     );
+    if (isNew) {
+      logCaseEvent(caseId, 'income_added',
+        `Income added: ${inc.employerName || inc.source} ($${(inc.grossMonthly || 0).toLocaleString()}/mo gross)`,
+        { income_id: id, gross_monthly: inc.grossMonthly || 0 }
+      );
+    }
     return { id };
   });
 
@@ -519,9 +731,16 @@ function registerIPC() {
   ipcMain.handle('expenses:upsert', (_, caseId, exp) => {
     const { v4: uuid } = require('uuid');
     const id = exp.id || uuid();
+    const isNew = !exp.id;
     db.prepare('INSERT OR REPLACE INTO expenses (id, case_id, category, description, monthly_amount) VALUES (?, ?, ?, ?, ?)').run(
       id, caseId, exp.category, exp.description || '', exp.monthlyAmount || 0
     );
+    if (isNew) {
+      logCaseEvent(caseId, 'expense_added',
+        `Expense added: ${exp.category} ($${(exp.monthlyAmount || 0).toLocaleString()}/mo)`,
+        { expense_id: id, amount: exp.monthlyAmount || 0, category: exp.category }
+      );
+    }
     return { id };
   });
 
@@ -558,6 +777,10 @@ function registerIPC() {
       fs.copyFileSync(filePath, destPath);
       const docType = guessDocType(filename);
       db.prepare('INSERT INTO documents (id, case_id, filename, file_path, doc_type, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, caseId, filename, destPath, docType, new Date().toISOString());
+      logCaseEvent(caseId, 'document_uploaded',
+        `Uploaded ${filename} (${(docType || 'other').replace('_', ' ')})`,
+        { document_id: id, filename, doc_type: docType }
+      );
       docs.push({ id, filename, docType });
     }
     return docs;
@@ -596,6 +819,11 @@ function registerIPC() {
     // Auto-populate case financial data from extraction
     populateCaseFromExtraction(doc.case_id, doc.doc_type, extracted);
 
+    logCaseEvent(doc.case_id, 'document_extracted',
+      `Extracted ${doc.filename}${extracted._mock ? ' (mock)' : ''}`,
+      { document_id: docId, mock: !!extracted._mock, redaction_count: extracted._redactionCount || 0 }
+    );
+
     return extracted;
   });
 
@@ -608,11 +836,22 @@ function registerIPC() {
     const { v4: uuid } = require('uuid');
     const id = uuid();
     db.prepare('INSERT INTO review_flags (id, case_id, section, field_path, note, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, flag.caseId, flag.section, flag.fieldPath || '', flag.note, new Date().toISOString());
+    logCaseEvent(flag.caseId, 'review_flag_created',
+      `Review flag added: ${flag.note}`,
+      { flag_id: id, section: flag.section }
+    );
     return { id };
   });
 
   ipcMain.handle('review-flags:resolve', (_, id) => {
+    const flag = db.prepare('SELECT case_id, note FROM review_flags WHERE id = ?').get(id);
     db.prepare('UPDATE review_flags SET resolved = 1 WHERE id = ?').run(id);
+    if (flag) {
+      logCaseEvent(flag.case_id, 'review_flag_resolved',
+        `Review flag resolved: ${flag.note}`,
+        { flag_id: id }
+      );
+    }
     return { success: true };
   });
 
@@ -642,6 +881,35 @@ function registerIPC() {
   // Check if API key is configured
   ipcMain.handle('means-test:check-api-key', () => {
     return !!process.env.ANTHROPIC_API_KEY;
+  });
+
+  // ─── Timeline / Events ──────────────────────────────────────
+  ipcMain.handle('events:list', (_, caseId) => {
+    return db.prepare(`
+      SELECT id, event_type, description, metadata, occurred_at
+      FROM case_events
+      WHERE case_id = ?
+      ORDER BY occurred_at DESC
+    `).all(caseId).map(e => ({
+      ...e,
+      metadata: e.metadata ? JSON.parse(e.metadata) : null,
+    }));
+  });
+
+  // Firm-wide recent activity feed for the dashboard.
+  ipcMain.handle('events:recent', (_, limit = 20) => {
+    return db.prepare(`
+      SELECT
+        e.id, e.event_type, e.description, e.occurred_at,
+        e.case_id,
+        d.first_name, d.last_name,
+        c.chapter, c.status
+      FROM case_events e
+      JOIN cases c ON c.id = e.case_id
+      LEFT JOIN debtors d ON d.case_id = e.case_id AND d.is_joint = 0
+      ORDER BY e.occurred_at DESC
+      LIMIT ?
+    `).all(limit);
   });
 
   // Stats for dashboard

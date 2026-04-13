@@ -58,6 +58,12 @@ contextBridge.exposeInMainWorld('tabula', {
     overview: () => ipcRenderer.invoke('stats:overview'),
   },
 
+  // Timeline events
+  events: {
+    list: (caseId) => ipcRenderer.invoke('events:list', caseId),
+    recent: (limit) => ipcRenderer.invoke('events:recent', limit),
+  },
+
   // Means Test
   meansTest: {
     uploadFiles: () => ipcRenderer.invoke('means-test:upload-files'),
