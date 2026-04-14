@@ -1,0 +1,45 @@
+# Render blueprint for deploying the Tabula LiteLLM proxy.
+#
+# Render picks this up automatically if you choose "New → Blueprint"
+# and point it at the repo root. It provisions:
+#   - a free Postgres database (audit log storage)
+#   - a free web service running the LiteLLM Docker image
+#
+# AFTER DEPLOY the human operator MUST set these env vars in the
+# Render dashboard (they cannot live in the repo):
+#   - ANTHROPIC_API_KEY     real Anthropic key (sk-ant-...)
+#   - LITELLM_MASTER_KEY    strong random string, shared with team
+#   - LITELLM_SALT_KEY      strong random string, internal only
+#
+# DATABASE_URL is wired automatically from the Postgres service below.
+
+databases:
+  - name: tabula-litellm-db
+    plan: free
+    databaseName: litellm
+    user: litellm
+
+services:
+  - type: web
+    name: tabula-litellm
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: litellm
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/readiness
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false          # operator must paste this in the dashboard
+      - key: LITELLM_MASTER_KEY
+        sync: false          # operator must paste this in the dashboard
+      - key: LITELLM_SALT_KEY
+        sync: false          # operator must paste this in the dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tabula-litellm-db
+          property: connectionString
+      - key: PORT
+        value: "4000"
+      - key: STORE_MODEL_IN_DB
+        value: "False"
