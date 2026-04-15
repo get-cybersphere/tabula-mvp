@@ -54,10 +54,10 @@ function CompletenessChip({ score, missingCount, readyToFile }) {
   );
 }
 
-export default function Dashboard({ navigate }) {
+export default function Dashboard({ navigate, initialFilter }) {
   const [cases, setCases] = useState([]);
   const [stats, setStats] = useState({ total: 0, intake: 0, inProgress: 0, ready: 0, filed: 0 });
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(initialFilter || 'all');
   const [search, setSearch] = useState('');
 
   const [recentEvents, setRecentEvents] = useState([]);
@@ -76,6 +76,10 @@ export default function Dashboard({ navigate }) {
     setAllCases(allCaseList);
     setRecentEvents(events || []);
   }, [statusFilter, search]);
+
+  useEffect(() => {
+    if (initialFilter) setStatusFilter(initialFilter);
+  }, [initialFilter]);
 
   useEffect(() => {
     loadData();
