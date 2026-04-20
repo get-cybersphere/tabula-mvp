@@ -531,6 +531,87 @@ Extract from this tax return:
   "dependents": 0
 }`;
 
+    case 'police_report':
+      return `You are a legal document extraction assistant for personal injury case preparation.
+Extract ALL relevant information from this police/accident report into structured JSON.
+Be precise with names, dates, and descriptions. If a value is unclear, include it with a "confidence": "low" flag.
+Return ONLY valid JSON, no markdown fences or explanation.
+
+Extract from this police/accident report:
+{
+  "type": "police_report",
+  "reportNumber": "report/case number",
+  "reportDate": "MM/DD/YYYY",
+  "accidentDate": "MM/DD/YYYY",
+  "accidentTime": "HH:MM AM/PM",
+  "accidentLocation": "full intersection or address",
+  "accidentType": "auto|truck|motorcycle|pedestrian|slip_fall|workplace|other",
+  "weatherConditions": "clear|rain|snow|fog|other",
+  "roadConditions": "dry|wet|icy|other",
+  "description": "narrative description of how the accident occurred",
+  "atFaultParty": "name of at-fault driver/party",
+  "atFaultVehicle": "year make model",
+  "atFaultInsurance": "insurance company name",
+  "atFaultPolicyNumber": "policy number if visible",
+  "clientVehicle": "year make model of client vehicle",
+  "injuries": ["list of injuries noted in report"],
+  "witnesses": [{"name": "witness name", "phone": "phone if listed"}],
+  "citations": ["any traffic citations issued"],
+  "ambulance": true,
+  "hospitalTransport": "hospital name if transported"
+}`;
+
+    case 'medical_bill':
+      return `You are a legal document extraction assistant for personal injury case preparation.
+Extract ALL billing and treatment information from this medical bill/record into structured JSON.
+Be precise with dollar amounts — do not round. If a value is unclear, include it with a "confidence": "low" flag.
+Return ONLY valid JSON, no markdown fences or explanation.
+
+Extract from this medical bill or record:
+{
+  "type": "medical_bill",
+  "providerName": "hospital/clinic/doctor name",
+  "providerType": "emergency_room|hospital|specialist|physical_therapy|imaging|pharmacy|other",
+  "patientName": "patient name",
+  "dateOfService": "MM/DD/YYYY",
+  "lastVisitDate": "MM/DD/YYYY if different from first",
+  "totalVisits": 1,
+  "diagnosis": ["list of diagnoses / ICD codes if visible"],
+  "procedures": ["list of procedures / CPT codes if visible"],
+  "treatmentDescription": "description of treatment provided",
+  "totalBilled": 0.00,
+  "insurancePaid": 0.00,
+  "patientPaid": 0.00,
+  "outstandingBalance": 0.00,
+  "hasLien": false,
+  "lienAmount": 0.00,
+  "notes": "any important observations"
+}`;
+
+    case 'insurance_declaration':
+      return `You are a legal document extraction assistant for personal injury case preparation.
+Extract ALL insurance policy information from this document into structured JSON.
+Return ONLY valid JSON, no markdown fences or explanation.
+
+Extract from this insurance document:
+{
+  "type": "insurance_declaration",
+  "insuranceCompany": "company name",
+  "policyNumber": "policy number",
+  "policyholderName": "name on policy",
+  "effectiveDates": "MM/DD/YYYY - MM/DD/YYYY",
+  "coverageType": "auto|homeowners|umbrella|commercial|other",
+  "bodilyInjuryLimit": 0.00,
+  "propertyDamageLimit": 0.00,
+  "umUimLimit": 0.00,
+  "medPayLimit": 0.00,
+  "pipLimit": 0.00,
+  "adjusterName": "adjuster name if listed",
+  "adjusterPhone": "phone if listed",
+  "claimNumber": "claim number if listed",
+  "notes": "any important observations about coverage"
+}`;
+
     default:
       return `${baseInstruction}
 
@@ -586,10 +667,14 @@ async function extractWithClaude(filePath, docCategory, debtorContext = {}) {
     const cleaned = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```\s*$/m, '').trim();
     const parsed = JSON.parse(cleaned);
     parsed._redactionCount = detections.length;
+    parsed._redactedFilePath = process.env.TABULA_KEEP_REDACTED === '1' ? redactedPath : null;
     return parsed;
   } finally {
-    // Always wipe the temp redacted file, even on error
-    redactionCleanup(redactedPath);
+    if (process.env.TABULA_KEEP_REDACTED === '1') {
+      console.log('[redaction] KEEPING redacted file for inspection:', redactedPath);
+    } else {
+      redactionCleanup(redactedPath);
+    }
   }
 }
 
@@ -641,6 +726,129 @@ function populateCaseFromExtraction(caseId, docType, extracted) {
         debtType, schedule, acct.balance || 0, 0, 0
       );
     }
+  }
+}
+
+// ─── PI Auto-populate from extraction ─────────────────────────
+function populatePICaseFromExtraction(caseId, docType, extracted) {
+  const { v4: uuid } = require('uuid');
+  const now = new Date().toISOString();
+
+  if (docType === 'police_report' || extracted.type === 'police_report') {
+    // Upsert pi_details with accident info from the police report
+    const existing = db.prepare('SELECT case_id FROM pi_case_details WHERE case_id = ?').get(caseId);
+    if (existing) {
+      db.prepare(`UPDATE pi_case_details SET
+        accident_date = COALESCE(?, accident_date),
+        accident_type = COALESCE(?, accident_type),
+        accident_location = COALESCE(?, accident_location),
+        accident_description = COALESCE(?, accident_description),
+        police_report_number = COALESCE(?, police_report_number),
+        weather_conditions = COALESCE(?, weather_conditions),
+        at_fault_party = COALESCE(?, at_fault_party),
+        at_fault_insurance = COALESCE(?, at_fault_insurance),
+        updated_at = ?
+        WHERE case_id = ?`).run(
+        extracted.accidentDate || null,
+        extracted.accidentType || null,
+        extracted.accidentLocation || null,
+        extracted.description || null,
+        extracted.reportNumber || null,
+        extracted.weatherConditions || null,
+        extracted.atFaultParty || null,
+        extracted.atFaultInsurance || null,
+        now, caseId
+      );
+    } else {
+      db.prepare(`INSERT INTO pi_case_details (case_id, accident_date, accident_type, accident_location,
+        accident_description, police_report_number, weather_conditions, at_fault_party, at_fault_insurance,
+        created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        caseId,
+        extracted.accidentDate || '', extracted.accidentType || 'auto',
+        extracted.accidentLocation || '', extracted.description || '',
+        extracted.reportNumber || '', extracted.weatherConditions || '',
+        extracted.atFaultParty || '', extracted.atFaultInsurance || '',
+        now, now
+      );
+    }
+    logCaseEvent(caseId, 'pi_details_extracted',
+      `Police report extracted: ${extracted.reportNumber || 'report'}, accident ${extracted.accidentDate || 'date unknown'}`,
+      { report_number: extracted.reportNumber, accident_type: extracted.accidentType }
+    );
+  }
+
+  if (docType === 'medical_bill' || extracted.type === 'medical_bill') {
+    const id = uuid();
+    db.prepare(`INSERT INTO pi_medical_records (id, case_id, provider_name, provider_type,
+      treatment_type, first_visit, last_visit, total_visits, total_billed, total_paid,
+      lien_amount, has_lien, status, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      id, caseId,
+      extracted.providerName || 'Unknown Provider',
+      extracted.providerType || 'other',
+      extracted.treatmentDescription || '',
+      extracted.dateOfService || '',
+      extracted.lastVisitDate || extracted.dateOfService || '',
+      extracted.totalVisits || 1,
+      extracted.totalBilled || 0,
+      (extracted.insurancePaid || 0) + (extracted.patientPaid || 0),
+      extracted.lienAmount || 0,
+      extracted.hasLien ? 1 : 0,
+      'ongoing',
+      [
+        ...(extracted.diagnosis || []).map(d => `Dx: ${d}`),
+        ...(extracted.procedures || []).map(p => `Proc: ${p}`),
+        extracted.notes || '',
+      ].filter(Boolean).join('; '),
+      now, now
+    );
+    logCaseEvent(caseId, 'medical_record_extracted',
+      `Medical record extracted: ${extracted.providerName || 'provider'} — $${(extracted.totalBilled || 0).toLocaleString()} billed`,
+      { provider: extracted.providerName, billed: extracted.totalBilled }
+    );
+  }
+
+  if (docType === 'insurance_declaration' || extracted.type === 'insurance_declaration') {
+    const existing = db.prepare('SELECT case_id FROM pi_case_details WHERE case_id = ?').get(caseId);
+    if (existing) {
+      db.prepare(`UPDATE pi_case_details SET
+        insurance_company = COALESCE(?, insurance_company),
+        insurance_policy_number = COALESCE(?, insurance_policy_number),
+        insurance_adjuster = COALESCE(?, insurance_adjuster),
+        insurance_adjuster_phone = COALESCE(?, insurance_adjuster_phone),
+        insurance_claim_number = COALESCE(?, insurance_claim_number),
+        insurance_coverage_limit = COALESCE(?, insurance_coverage_limit),
+        um_uim_available = CASE WHEN ? > 0 THEN 1 ELSE um_uim_available END,
+        um_uim_limit = COALESCE(?, um_uim_limit),
+        updated_at = ?
+        WHERE case_id = ?`).run(
+        extracted.insuranceCompany || null,
+        extracted.policyNumber || null,
+        extracted.adjusterName || null,
+        extracted.adjusterPhone || null,
+        extracted.claimNumber || null,
+        extracted.bodilyInjuryLimit || null,
+        extracted.umUimLimit || 0,
+        extracted.umUimLimit || null,
+        now, caseId
+      );
+    } else {
+      db.prepare(`INSERT INTO pi_case_details (case_id, insurance_company, insurance_policy_number,
+        insurance_adjuster, insurance_adjuster_phone, insurance_claim_number, insurance_coverage_limit,
+        um_uim_available, um_uim_limit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        caseId,
+        extracted.insuranceCompany || '', extracted.policyNumber || '',
+        extracted.adjusterName || '', extracted.adjusterPhone || '',
+        extracted.claimNumber || '', extracted.bodilyInjuryLimit || 0,
+        extracted.umUimLimit ? 1 : 0, extracted.umUimLimit || 0,
+        now, now
+      );
+    }
+    logCaseEvent(caseId, 'insurance_extracted',
+      `Insurance info extracted: ${extracted.insuranceCompany || 'carrier'}, BI limit $${(extracted.bodilyInjuryLimit || 0).toLocaleString()}`,
+      { carrier: extracted.insuranceCompany, bi_limit: extracted.bodilyInjuryLimit }
+    );
   }
 }
 
@@ -936,10 +1144,15 @@ function registerIPC() {
     if (!doc) return null;
 
     const categoryMap = {
+      // Bankruptcy
       'pay_stub': 'paystub',
       'tax_return': 'tax_return',
       'bank_statement': 'bank_statement',
       'credit_report': 'other',
+      // PI
+      'police_report': 'police_report',
+      'medical_bill': 'medical_bill',
+      'insurance_declaration': 'insurance_declaration',
       'other': 'other',
     };
     const category = categoryMap[doc.doc_type] || 'other';
@@ -958,7 +1171,10 @@ function registerIPC() {
     db.prepare('UPDATE documents SET extracted_data = ? WHERE id = ?').run(JSON.stringify(extracted), docId);
 
     // Auto-populate case financial data from extraction
+    // Auto-populate: run both bankruptcy and PI population functions.
+    // Each one checks the doc type and only acts on relevant documents.
     populateCaseFromExtraction(doc.case_id, doc.doc_type, extracted);
+    populatePICaseFromExtraction(doc.case_id, doc.doc_type, extracted);
 
     logCaseEvent(doc.case_id, 'document_extracted',
       `Extracted ${doc.filename}${extracted._mock ? ' (mock)' : ''}`,
@@ -1107,6 +1323,16 @@ function registerIPC() {
     const notes = db.prepare('SELECT content FROM case_notes WHERE case_id = ? ORDER BY created_at DESC LIMIT 10').all(caseId);
     const history = db.prepare('SELECT role, content FROM ai_conversations WHERE case_id = ? ORDER BY created_at DESC LIMIT 20').all(caseId).reverse();
 
+    // "What changed since last conversation" — find events after the last AI message
+    const lastAiMsg = db.prepare('SELECT created_at FROM ai_conversations WHERE case_id = ? AND role = ? ORDER BY created_at DESC LIMIT 1').get(caseId, 'assistant');
+    let changesSummary = '';
+    if (lastAiMsg) {
+      const recentEvents = db.prepare('SELECT description FROM case_events WHERE case_id = ? AND occurred_at > ? ORDER BY occurred_at ASC LIMIT 10').all(caseId, lastAiMsg.created_at);
+      if (recentEvents.length > 0) {
+        changesSummary = `\n\nCHANGES SINCE LAST CONVERSATION:\n${recentEvents.map(e => `- ${e.description}`).join('\n')}`;
+      }
+    }
+
     const totalDebt = creditors.reduce((s, c) => s + (c.amount_claimed || 0), 0);
     const totalMonthlyIncome = income.reduce((s, i) => s + (i.gross_monthly || 0), 0);
     const totalMonthlyExpenses = expenses.reduce((s, e) => s + (e.monthly_amount || 0), 0);
@@ -1138,7 +1364,7 @@ You can help with:
 5. Filing strategy and timeline
 6. Drafting attorney notes and memos
 
-Be concise, specific to THIS case, and cite relevant bankruptcy code sections when applicable. If you identify a risk, flag it clearly.`;
+Be concise, specific to THIS case, and cite relevant bankruptcy code sections when applicable. If you identify a risk, flag it clearly.${changesSummary}`;
     } else if (practiceType === 'personal_injury') {
       const piDetails = db.prepare('SELECT * FROM pi_case_details WHERE case_id = ?').get(caseId);
       const medRecords = db.prepare('SELECT * FROM pi_medical_records WHERE case_id = ?').all(caseId);
@@ -1189,7 +1415,7 @@ You can help with:
 8. Insurance coverage analysis (stacking, UM/UIM, excess)
 9. Settlement distribution calculations (fees, costs, liens, net to client)
 
-Be concise, specific to THIS case, and cite relevant case law or statutes when applicable.`;
+Be concise, specific to THIS case, and cite relevant case law or statutes when applicable.${changesSummary}`;
     } else {
       systemPrompt = `You are Tabula AI, a legal assistant helping an attorney with a case.
 
@@ -1199,7 +1425,7 @@ CASE CONTEXT:
 - District: ${caseData?.district || 'Not set'}
 ${notes.length > 0 ? `\nATTORNEY NOTES:\n${notes.map(n => `- ${n.content}`).join('\n')}` : ''}
 
-Be concise, specific to THIS case, and help the attorney with analysis, drafting, research, and strategy.`;
+Be concise, specific to THIS case, and help the attorney with analysis, drafting, research, and strategy.${changesSummary}`;
     }
 
     try {
@@ -1405,11 +1631,16 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
 
 function guessDocType(filename) {
   const lower = filename.toLowerCase();
+  // Bankruptcy doc types
   if (lower.includes('w2') || lower.includes('w-2')) return 'tax_return';
   if (lower.includes('tax') || lower.includes('1040')) return 'tax_return';
   if (lower.includes('pay') || lower.includes('stub') || lower.includes('earnings')) return 'pay_stub';
   if (lower.includes('bank') || lower.includes('statement') || lower.includes('chase') || lower.includes('wells') || lower.includes('boa')) return 'bank_statement';
   if (lower.includes('credit') || lower.includes('equifax') || lower.includes('experian') || lower.includes('transunion')) return 'credit_report';
+  // PI doc types
+  if (lower.includes('police') || lower.includes('accident_report') || lower.includes('crash') || lower.includes('incident')) return 'police_report';
+  if (lower.includes('medical') || lower.includes('hospital') || lower.includes('bill') || lower.includes('invoice') || lower.includes('eob') || lower.includes('treatment')) return 'medical_bill';
+  if (lower.includes('insurance') || lower.includes('declaration') || lower.includes('policy') || lower.includes('coverage') || lower.includes('claim')) return 'insurance_declaration';
   return 'other';
 }
 

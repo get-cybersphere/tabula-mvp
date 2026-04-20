@@ -83,6 +83,7 @@ export default function NewCase({ navigate }) {
           <p className="page-subtitle">
             {form.practiceType === 'bankruptcy' ? 'Enter debtor information to create a new bankruptcy case' :
              form.practiceType === 'personal_injury' ? 'Enter client and accident information to open a new PI case' :
+             form.practiceType === 'estate_administration' ? 'Enter decedent and fiduciary information to open an estate case' :
              'Enter client information to create a new case'}
           </p>
         </div>
@@ -103,6 +104,7 @@ export default function NewCase({ navigate }) {
                 {[
                   { key: 'bankruptcy', label: 'Bankruptcy' },
                   { key: 'personal_injury', label: 'Personal Injury' },
+                  { key: 'estate_administration', label: 'Estate Administration' },
                   { key: 'general', label: 'General / Other' },
                 ].map(p => (
                   <button

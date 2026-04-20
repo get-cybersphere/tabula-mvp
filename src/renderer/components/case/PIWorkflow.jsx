@@ -564,6 +564,23 @@ export function CaseValuationTab({ caseId, caseData }) {
   const [details, setDetails] = useState(null);
   const [multiplier, setMultiplier] = useState(3);
 
+  // 6 valuation parameters flagged by Sstieglitz
+  const debtor = caseData?.debtors?.[0] || {};
+  const calcAge = (dob) => {
+    if (!dob) return '';
+    const diff = Date.now() - new Date(dob).getTime();
+    return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
+  };
+  const [plaintiffAge, setPlaintiffAge] = useState(calcAge(debtor.dob) || '');
+  const [jurisdiction, setJurisdiction] = useState(caseData?.district || '');
+  const [injurySeverity, setInjurySeverity] = useState('moderate');
+  const [occupation, setOccupation] = useState('');
+  const [annualIncome, setAnnualIncome] = useState('');
+
+  // Verdict range estimation
+  const [verdictEstimate, setVerdictEstimate] = useState(null);
+  const [estimating, setEstimating] = useState(false);
+
   useEffect(() => {
     window.tabula.pi.medical.list(caseId).then(setRecords);
     window.tabula.pi.details.get(caseId).then(setDetails);
@@ -587,8 +604,168 @@ export function CaseValuationTab({ caseId, caseData }) {
   const umLimit = details?.um_uim_available ? (details?.um_uim_limit || 0) : 0;
   const maxRecovery = policyLimit + umLimit;
 
+  const handleEstimateRange = async () => {
+    setEstimating(true);
+    try {
+      const accType = (details?.accident_type || 'auto').replace('_', ' ');
+      const injuries = records.map(r => r.treatment_type || r.provider_type || '').filter(Boolean).join(', ');
+      const prompt = `You are a personal injury case valuation expert. Based on the following case parameters, estimate a realistic jury verdict and settlement range. Be specific about the dollar range and explain your reasoning briefly.
+
+Case Parameters:
+- Jurisdiction: ${jurisdiction || 'Unknown'}
+- Accident Type: ${accType}
+- Plaintiff Age: ${plaintiffAge || 'Unknown'}
+- Injury Severity: ${injurySeverity}
+- Occupation: ${occupation || 'Unknown'}
+- Annual Income: ${annualIncome ? '$' + Number(annualIncome).toLocaleString() : 'Unknown'}
+- Medical Specials to Date: $${totalMedicals.toLocaleString()}
+- Total Medical Providers: ${records.length}
+- Treatment Types: ${injuries || 'Not specified'}
+- Comparative Fault: ${faultPct}%
+- At-Fault Policy Limit: $${policyLimit.toLocaleString()}
+- UM/UIM Available: ${umLimit > 0 ? '$' + umLimit.toLocaleString() : 'No'}
+- Medical Liens: $${totalLiens.toLocaleString()}
+
+Respond in this exact JSON format:
+{
+  "lowRange": <number>,
+  "highRange": <number>,
+  "medianEstimate": <number>,
+  "confidence": "low|medium|high",
+  "reasoning": "<2-3 sentences explaining the range>",
+  "keyFactors": ["<factor 1>", "<factor 2>", "<factor 3>"],
+  "warnings": ["<any concerns about the case>"]
+}`;
+
+      const response = await window.tabula.ai.chat(caseId, prompt);
+      // Parse JSON from Claude's response
+      const text = typeof response === 'string' ? response : response?.content || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        setVerdictEstimate(JSON.parse(jsonMatch[0]));
+      }
+    } catch (err) {
+      console.error('Verdict estimation failed:', err);
+      setVerdictEstimate({ error: err.message || 'Estimation failed' });
+    }
+    setEstimating(false);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Case Parameters — the 6 factors Sstieglitz flagged */}
+      <div className="card">
+        <div className="card-header">
+          <span className="card-title">Case Parameters</span>
+          <span className="text-xs text-muted">factors that drive comparable verdict matching</span>
+        </div>
+        <div className="card-body">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Plaintiff Age</label>
+              <input className="form-input" type="number" min="0" max="120" value={plaintiffAge} onChange={e => setPlaintiffAge(e.target.value)} placeholder="Auto-filled from DOB" />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Jurisdiction (County)</label>
+              <input className="form-input" type="text" value={jurisdiction} onChange={e => setJurisdiction(e.target.value)} placeholder="e.g. Travis County, TX" />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Injury Severity</label>
+              <select className="form-select" value={injurySeverity} onChange={e => setInjurySeverity(e.target.value)}>
+                <option value="soft_tissue">Soft Tissue (minor strain/sprain)</option>
+                <option value="moderate">Moderate (herniation, fracture)</option>
+                <option value="serious">Serious (surgery required)</option>
+                <option value="severe">Severe (TBI, spinal cord)</option>
+                <option value="catastrophic">Catastrophic (permanent disability)</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Occupation</label>
+              <input className="form-input" type="text" value={occupation} onChange={e => setOccupation(e.target.value)} placeholder="e.g. Administrative assistant" />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Annual Income</label>
+              <input className="form-input" type="number" value={annualIncome} onChange={e => setAnnualIncome(e.target.value)} placeholder="e.g. 42000" />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleEstimateRange}
+                disabled={estimating}
+                style={{ width: '100%', height: 40 }}
+              >
+                {estimating ? 'Estimating...' : 'Estimate Verdict Range'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Verdict Range Estimation Card */}
+      {verdictEstimate && !verdictEstimate.error && (
+        <div className="card" style={{ borderLeft: '4px solid var(--sage)' }}>
+          <div className="card-header">
+            <span className="card-title">AI-Estimated Verdict Range</span>
+            <span className={`badge ${verdictEstimate.confidence === 'high' ? 'ready' : verdictEstimate.confidence === 'medium' ? 'in_progress' : 'intake'}`}>
+              {verdictEstimate.confidence} confidence
+            </span>
+          </div>
+          <div className="card-body">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 16 }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--warm-gray)', marginBottom: 4 }}>Low Estimate</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--warm-gray)' }}>${Number(verdictEstimate.lowRange || 0).toLocaleString()}</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--warm-gray)', marginBottom: 4 }}>Median Estimate</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--sage)' }}>${Number(verdictEstimate.medianEstimate || 0).toLocaleString()}</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--warm-gray)', marginBottom: 4 }}>High Estimate</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--warm-gray)' }}>${Number(verdictEstimate.highRange || 0).toLocaleString()}</div>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--ink)', lineHeight: 1.6, marginBottom: 12 }}>
+              {verdictEstimate.reasoning}
+            </p>
+
+            {verdictEstimate.keyFactors && verdictEstimate.keyFactors.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6 }}>Key Factors</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {verdictEstimate.keyFactors.map((f, i) => (
+                    <span key={i} style={{ fontSize: '0.78rem', padding: '3px 10px', borderRadius: 12, background: 'rgba(106,138,100,0.1)', color: 'var(--sage)' }}>{f}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {verdictEstimate.warnings && verdictEstimate.warnings.length > 0 && (
+              <div>
+                {verdictEstimate.warnings.map((w, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, padding: '6px 10px', background: 'rgba(196,124,72,0.06)', borderRadius: 4, marginBottom: 4, fontSize: '0.82rem', color: 'var(--accent)' }}>
+                    <span style={{ fontWeight: 600 }}>!</span> {w}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(10,10,10,0.03)', borderRadius: 4, fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
+              AI-estimated range based on case parameters. Not a legal citation. Verify with jurisdiction-specific verdict research before including in demand.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {verdictEstimate?.error && (
+        <div className="card" style={{ borderLeft: '4px solid var(--accent)' }}>
+          <div className="card-body">
+            <p style={{ color: 'var(--accent)', fontSize: '0.85rem' }}>Verdict estimation failed: {verdictEstimate.error}</p>
+          </div>
+        </div>
+      )}
+
       {/* Damages Calculator */}
       <div className="card">
         <div className="card-header">
