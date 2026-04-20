@@ -736,9 +736,9 @@ function populatePICaseFromExtraction(caseId, docType, extracted) {
 
   if (docType === 'police_report' || extracted.type === 'police_report') {
     // Upsert pi_details with accident info from the police report
-    const existing = db.prepare('SELECT case_id FROM pi_details WHERE case_id = ?').get(caseId);
+    const existing = db.prepare('SELECT case_id FROM pi_case_details WHERE case_id = ?').get(caseId);
     if (existing) {
-      db.prepare(`UPDATE pi_details SET
+      db.prepare(`UPDATE pi_case_details SET
         accident_date = COALESCE(?, accident_date),
         accident_type = COALESCE(?, accident_type),
         accident_location = COALESCE(?, accident_location),
@@ -760,7 +760,7 @@ function populatePICaseFromExtraction(caseId, docType, extracted) {
         now, caseId
       );
     } else {
-      db.prepare(`INSERT INTO pi_details (case_id, accident_date, accident_type, accident_location,
+      db.prepare(`INSERT INTO pi_case_details (case_id, accident_date, accident_type, accident_location,
         accident_description, police_report_number, weather_conditions, at_fault_party, at_fault_insurance,
         created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         caseId,
@@ -809,9 +809,9 @@ function populatePICaseFromExtraction(caseId, docType, extracted) {
   }
 
   if (docType === 'insurance_declaration' || extracted.type === 'insurance_declaration') {
-    const existing = db.prepare('SELECT case_id FROM pi_details WHERE case_id = ?').get(caseId);
+    const existing = db.prepare('SELECT case_id FROM pi_case_details WHERE case_id = ?').get(caseId);
     if (existing) {
-      db.prepare(`UPDATE pi_details SET
+      db.prepare(`UPDATE pi_case_details SET
         insurance_company = COALESCE(?, insurance_company),
         insurance_policy_number = COALESCE(?, insurance_policy_number),
         insurance_adjuster = COALESCE(?, insurance_adjuster),
@@ -833,7 +833,7 @@ function populatePICaseFromExtraction(caseId, docType, extracted) {
         now, caseId
       );
     } else {
-      db.prepare(`INSERT INTO pi_details (case_id, insurance_company, insurance_policy_number,
+      db.prepare(`INSERT INTO pi_case_details (case_id, insurance_company, insurance_policy_number,
         insurance_adjuster, insurance_adjuster_phone, insurance_claim_number, insurance_coverage_limit,
         um_uim_available, um_uim_limit, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
