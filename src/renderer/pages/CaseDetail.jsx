@@ -273,35 +273,70 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
     onRefresh();
   };
 
+  const isPI = caseData.practice_type === 'personal_injury';
+  const totalMedicalBilled = (caseData.medicalRecords || []).reduce((s, r) => s + (r.total_billed || 0), 0);
+  const totalMedicalPaid = (caseData.medicalRecords || []).reduce((s, r) => s + (r.total_paid || 0), 0);
+  const totalMedicalOutstanding = totalMedicalBilled - totalMedicalPaid;
+  const totalLiens = (caseData.medicalRecords || []).reduce((s, r) => s + (r.has_lien ? (r.lien_amount || 0) : 0), 0);
+
   return (
     <div>
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-label">Total Debt</div>
-          <div className="stat-value" style={{ color: 'var(--accent)' }}>
-            ${totalDebt.toLocaleString()}
+      {isPI ? (
+        /* ── PI Summary Stats ──────────────────────────────── */
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Medical Bills</div>
+            <div className="stat-value" style={{ color: 'var(--accent)' }}>
+              ${totalMedicalBilled.toLocaleString()}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Insurance Paid</div>
+            <div className="stat-value" style={{ color: 'var(--sage)' }}>
+              ${totalMedicalPaid.toLocaleString()}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Outstanding</div>
+            <div className="stat-value" style={{ color: 'var(--amber)' }}>
+              ${totalMedicalOutstanding.toLocaleString()}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Liens</div>
+            <div className="stat-value">${totalLiens.toLocaleString()}</div>
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">Total Assets</div>
-          <div className="stat-value">${totalAssets.toLocaleString()}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Monthly Income</div>
-          <div className="stat-value" style={{ color: 'var(--sage)' }}>
-            ${monthlyIncome.toLocaleString()}
+      ) : (
+        /* ── Bankruptcy Summary Stats ──────────────────────── */
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Total Debt</div>
+            <div className="stat-value" style={{ color: 'var(--accent)' }}>
+              ${totalDebt.toLocaleString()}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Total Assets</div>
+            <div className="stat-value">${totalAssets.toLocaleString()}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Monthly Income</div>
+            <div className="stat-value" style={{ color: 'var(--sage)' }}>
+              ${monthlyIncome.toLocaleString()}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Monthly Expenses</div>
+            <div className="stat-value">${monthlyExpenses.toLocaleString()}</div>
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">Monthly Expenses</div>
-          <div className="stat-value">${monthlyExpenses.toLocaleString()}</div>
-        </div>
-      </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Debtor Information</span>
+            <span className="card-title">{isPI ? 'Client Information' : 'Debtor Information'}</span>
             {!editingInfo && (
               <button className="btn btn-sm btn-secondary" onClick={() => setEditingInfo(true)}>Edit</button>
             )}
@@ -401,8 +436,8 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
         </div>
       </div>
 
-      {/* Joint Debtor Section */}
-      <div className="card" style={{ marginTop: 20 }}>
+      {/* Joint Debtor Section — bankruptcy only */}
+      {!isPI && <div className="card" style={{ marginTop: 20 }}>
         <div className="card-header">
           <span className="card-title">Joint Filing (Spouse)</span>
           {!jointDebtor && !showJointForm && (
@@ -488,11 +523,11 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
             <p className="text-sm text-muted">No joint debtor. Click "Add Joint Debtor" for a joint filing.</p>
           )}
         </div>
-      </div>
+      </div>}
 
       <DeadlinesCard caseData={caseData} />
 
-      <CompletenessPanel caseData={caseData} />
+      {!isPI && <CompletenessPanel caseData={caseData} />}
     </div>
   );
 }
