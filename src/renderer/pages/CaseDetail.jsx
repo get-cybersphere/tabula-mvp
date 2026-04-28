@@ -6,6 +6,8 @@ import { computeCompleteness } from '../lib/case-completeness.js';
 import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
+import { useToast } from '../lib/toast.jsx';
+import { confirmAction } from '../lib/confirm.js';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -43,6 +45,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
   const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const [loading, setLoading] = useState(true);
   const [aiOpen, setAiOpen] = useState(false);
+  const toast = useToast();
 
   const loadCase = useCallback(async () => {
     setLoading(true);
@@ -56,8 +59,13 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
   }, [loadCase]);
 
   const handleStatusChange = async (newStatus) => {
-    await window.tabula.cases.update(caseId, { status: newStatus });
-    loadCase();
+    try {
+      await window.tabula.cases.update(caseId, { status: newStatus });
+      toast.success(`Status changed to ${STATUS_LABELS[newStatus] || newStatus}`);
+      loadCase();
+    } catch (err) {
+      toast.error(`Could not update status: ${err.message || 'unknown error'}`);
+    }
   };
 
   const handleUploadDocuments = async () => {
@@ -269,6 +277,7 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
   };
 
   const handleRemoveJointDebtor = async (id) => {
+    if (!confirmAction('Remove the joint debtor from this case? This cannot be undone.')) return;
     await window.tabula.debtors.delete(id);
     onRefresh();
   };
@@ -1080,6 +1089,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   };
 
   const handleDeleteIncome = async (id) => {
+    if (!confirmAction('Delete this income entry?')) return;
     await window.tabula.income.delete(id);
     setShowResult(false);
     onRefresh();
@@ -1099,6 +1109,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   };
 
   const handleDeleteExpense = async (id) => {
+    if (!confirmAction('Delete this expense entry?')) return;
     await window.tabula.expenses.delete(id);
     setShowResult(false);
     onRefresh();

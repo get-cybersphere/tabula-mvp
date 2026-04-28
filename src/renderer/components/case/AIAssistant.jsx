@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { confirmAction } from '../../lib/confirm.js';
 
 /**
  * AI Case Assistant — slide-out panel with Claude-powered contextual chat.
@@ -60,6 +61,7 @@ export default function AIAssistant({ caseId, practiceType, isOpen, onClose }) {
   }, [input, loading, caseId]);
 
   const handleClear = async () => {
+    if (!confirmAction('Clear this conversation? This cannot be undone.')) return;
     await window.tabula.ai.clear(caseId);
     setMessages([]);
   };

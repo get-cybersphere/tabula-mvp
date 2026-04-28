@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useToast } from '../lib/toast.jsx';
 
 const DISTRICTS = [
   'N.D. Alabama', 'M.D. Alabama', 'S.D. Alabama', 'D. Alaska', 'D. Arizona',
@@ -43,17 +44,45 @@ export default function NewCase({ navigate }) {
     practiceType: 'bankruptcy',
   });
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
+  const toast = useToast();
 
-  const update = (field, value) => setForm((f) => ({ ...f, [field]: value }));
+  const update = (field, value) => {
+    setForm((f) => ({ ...f, [field]: value }));
+    if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }));
+  };
+
+  const validate = () => {
+    const next = {};
+    if (!form.firstName.trim()) next.firstName = 'First name is required';
+    if (!form.lastName.trim()) next.lastName = 'Last name is required';
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      next.email = 'Enter a valid email address';
+    }
+    if (form.zip && !/^\d{5}(-\d{4})?$/.test(form.zip)) {
+      next.zip = 'Use a 5- or 9-digit ZIP';
+    }
+    return next;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.firstName || !form.lastName) return;
+    const validation = validate();
+    if (Object.keys(validation).length > 0) {
+      setErrors(validation);
+      const firstField = Object.keys(validation)[0];
+      const el = document.querySelector(`[name="${firstField}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+      }
+      return;
+    }
     setSaving(true);
     try {
       const result = await window.tabula.cases.create({
         chapter: form.practiceType === 'bankruptcy' ? form.chapter : null,
-        district: form.district,
+        district: form.practiceType === 'bankruptcy' ? form.district : null,
         practiceType: form.practiceType,
         debtor: {
           firstName: form.firstName,
@@ -68,9 +97,11 @@ export default function NewCase({ navigate }) {
           zip: form.zip,
         },
       });
-      navigate(`/cases/${result.id}/documents`);
+      toast.success('Case created');
+      navigate(`/cases/${result.id}`);
     } catch (err) {
       console.error('Failed to create case:', err);
+      toast.error(`Failed to create case: ${err.message || 'unknown error'}`);
       setSaving(false);
     }
   };
@@ -118,34 +149,34 @@ export default function NewCase({ navigate }) {
                 ))}
               </div>
             </div>
-            <div className="form-row">
-              {form.practiceType === 'bankruptcy' && (
-              <div className="form-group">
-                <label className="form-label">Chapter</label>
-                <select
-                  className="form-select"
-                  value={form.chapter}
-                  onChange={(e) => update('chapter', parseInt(e.target.value))}
-                >
-                  <option value={7}>Chapter 7 — Liquidation</option>
-                  <option value={13}>Chapter 13 — Wage Earner Plan</option>
-                </select>
+            {form.practiceType === 'bankruptcy' && (
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Chapter</label>
+                  <select
+                    className="form-select"
+                    value={form.chapter}
+                    onChange={(e) => update('chapter', parseInt(e.target.value))}
+                  >
+                    <option value={7}>Chapter 7 — Liquidation</option>
+                    <option value={13}>Chapter 13 — Wage Earner Plan</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">District</label>
+                  <select
+                    className="form-select"
+                    value={form.district}
+                    onChange={(e) => update('district', e.target.value)}
+                  >
+                    <option value="">Select district...</option>
+                    {DISTRICTS.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              )}
-              <div className="form-group">
-                <label className="form-label">District</label>
-                <select
-                  className="form-select"
-                  value={form.district}
-                  onChange={(e) => update('district', e.target.value)}
-                >
-                  <option value="">Select district...</option>
-                  {DISTRICTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -160,22 +191,28 @@ export default function NewCase({ navigate }) {
                 <input
                   className="form-input"
                   type="text"
+                  name="firstName"
                   placeholder="First name"
                   value={form.firstName}
                   onChange={(e) => update('firstName', e.target.value)}
+                  aria-invalid={!!errors.firstName}
                   required
                 />
+                {errors.firstName && <FieldError text={errors.firstName} />}
               </div>
               <div className="form-group">
                 <label className="form-label">Last Name</label>
                 <input
                   className="form-input"
                   type="text"
+                  name="lastName"
                   placeholder="Last name"
                   value={form.lastName}
                   onChange={(e) => update('lastName', e.target.value)}
+                  aria-invalid={!!errors.lastName}
                   required
                 />
+                {errors.lastName && <FieldError text={errors.lastName} />}
               </div>
             </div>
 
@@ -217,10 +254,13 @@ export default function NewCase({ navigate }) {
                 <input
                   className="form-input"
                   type="email"
+                  name="email"
                   placeholder="debtor@email.com"
                   value={form.email}
                   onChange={(e) => update('email', e.target.value)}
+                  aria-invalid={!!errors.email}
                 />
+                {errors.email && <FieldError text={errors.email} />}
               </div>
             </div>
           </div>
@@ -268,11 +308,14 @@ export default function NewCase({ navigate }) {
                 <input
                   className="form-input"
                   type="text"
+                  name="zip"
                   placeholder="75001"
                   maxLength="10"
                   value={form.zip}
                   onChange={(e) => update('zip', e.target.value)}
+                  aria-invalid={!!errors.zip}
                 />
+                {errors.zip && <FieldError text={errors.zip} />}
               </div>
             </div>
           </div>
@@ -287,6 +330,16 @@ export default function NewCase({ navigate }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function FieldError({ text }) {
+  return (
+    <div role="alert" style={{
+      marginTop: 6, fontSize: '0.78rem', color: 'var(--accent)',
+    }}>
+      {text}
     </div>
   );
 }

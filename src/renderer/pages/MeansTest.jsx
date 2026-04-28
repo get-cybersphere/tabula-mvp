@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getAllStates } from '../lib/median-income.js';
 import { runMeansTest, aggregateExtractedData } from '../lib/means-test.js';
+import { useToast } from '../lib/toast.jsx';
 
 const STATES = getAllStates();
 
@@ -362,6 +363,7 @@ function ExtractionStep({ files, setDocuments, onNext, onBack }) {
 
 // ─── Step 3: Review Dashboard ────────────────────────────────
 function ReviewStep({ documents, onBack, navigate }) {
+  const toast = useToast();
   const aggregated = aggregateExtractedData(documents);
 
   const [state, setState] = useState('TX');
@@ -443,9 +445,11 @@ function ReviewStep({ documents, onBack, navigate }) {
           });
         }
       }
+      toast.success('Case created from means test');
       navigate(`/cases/${newCase.id}`);
     } catch (err) {
       console.error('Failed to save case:', err);
+      toast.error(`Failed to save case: ${err.message || 'unknown error'}`);
       setSaving(false);
     }
   };
@@ -781,7 +785,10 @@ function ReviewStep({ documents, onBack, navigate }) {
           Start Over
         </button>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-secondary" onClick={() => exportSummary(meansResult, incomeSources, expenses, state, householdSize)}>
+          <button className="btn btn-secondary" onClick={() => {
+            exportSummary(meansResult, incomeSources, expenses, state, householdSize);
+            toast.success('Summary downloaded');
+          }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
@@ -927,7 +934,7 @@ export default function MeansTest({ navigate }) {
 
       <StepIndicator currentStep={step} />
 
-      {!hasApiKey && step < 3 && (
+      {!hasApiKey && step === 1 && (
         <div className="mt-api-warning">
           <AlertIcon />
           <div className="mt-api-warning-text">
