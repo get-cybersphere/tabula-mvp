@@ -1,11 +1,19 @@
-// IRS Collection Financial Standards used in the Chapter 7 Means Test
-// Source: IRS.gov — effective March 2024
+// IRS Collection Financial Standards used in the Chapter 7 Means Test.
 //
-// National Standards: food, clothing, housekeeping, personal care, misc.
-// Local Standards: housing/utilities and transportation (vary by state/county)
+// Two layers:
+//   - Static module-level constants below (legacy state-level fallback).
+//   - data/irs-standards-2026Q2.json + irs-county.js (county-level).
 //
-// For simplicity, we hardcode Local Standards for the top 10 states by population
-// and use a national average for others.
+// `getAllowedDeductions()` uses the JSON-backed county lookup when a
+// `countyFips` is supplied, and falls back to the constants here when
+// it isn't (e.g. a debtor whose ZIP didn't resolve).
+
+import {
+  getCountyHousingUtility,
+  getOperatingCostByState,
+  getOwnershipCost,
+  getEffectiveDate,
+} from './irs-county.js';
 
 // ─── National Standards ──────────────────────────────────────────
 // Monthly allowance for food, clothing & services, housekeeping supplies,
@@ -89,25 +97,92 @@ export function getTransportationAllowance(vehicleCount = 1) {
 export function getAllowedDeductions({
   householdSize = 1,
   stateCode = 'TX',
+  countyFips = null,         // accepted for forward-compat; Sprint 3 wires county data
   vehicleCount = 1,
   over65Count = 0,
-  actualSecuredDebt = 0,   // monthly mortgage + car loan payments
-  priorityDebt = 0,        // monthly priority debt (taxes, child support)
+  actualSecuredDebt = 0,
+  priorityDebt = 0,
 }) {
-  const national = getNationalStandard(householdSize);
-  const healthCare = getHealthCareAllowance(householdSize, over65Count);
-  const housing = getHousingUtility(stateCode, householdSize);
-  const transportation = getTransportationAllowance(vehicleCount);
+  // Sprint 3 will route county-keyed lookups through ./irs-county.js. For
+  // now we accept the param and pass it into the citation so the audit
+  // trail records what the caller asked for, even when the data isn't
+  // resolved at county level yet.
+  const effectiveDate = getEffectiveDate();
+  const citations = {};
 
-  const deductions = {
+  // ─── Housing & utilities (county-preferred, state-fallback) ───
+  let housing, housingCitation;
+  if (countyFips) {
+    const c = getCountyHousingUtility(countyFips, householdSize);
+    if (c) {
+      housing = c.amount;
+      housingCitation = {
+        tableName: 'housing_utilities',
+        scope: c.scope,
+        county_fips: c.county_fips || countyFips,
+        county_name: c.county_name,
+        state_code: c.state_code || stateCode,
+        household_size: householdSize,
+        amount: c.amount,
+        effective_date: c.effective_date,
+        source_url: c.source_url,
+        note: c.note,
+      };
+    }
+  }
+  if (housing == null) {
+    housing = getHousingUtility(stateCode, householdSize);
+    housingCitation = {
+      tableName: 'housing_utilities',
+      scope: 'state',
+      state_code: stateCode,
+      household_size: householdSize,
+      amount: housing,
+      effective_date: effectiveDate,
+      note: countyFips ? 'County not in table; state-level fallback used.' : 'No county provided; state-level fallback.',
+    };
+  }
+  citations['B122A-2 Line 8'] = housingCitation;
+
+  // ─── Transportation (per-region operating + national ownership) ─
+  const op = getOperatingCostByState(stateCode, vehicleCount);
+  const own = getOwnershipCost(vehicleCount);
+  const transportation = (op.amount || 0) + (own.amount || 0);
+  citations['B122A-2 Line 13'] = {
+    tableName: op.tableName, scope: op.scope, region: op.region,
+    state_code: stateCode, vehicleCount, amount: op.amount, effective_date: op.effective_date,
+  };
+  if (own.amount > 0) {
+    citations['B122A-2 Line 12'] = {
+      tableName: own.tableName, scope: own.scope, vehicleCount,
+      amount: own.amount, effective_date: own.effective_date,
+    };
+  }
+
+  // ─── National + health (size-based, no geographic variance) ────
+  const national   = getNationalStandard(householdSize);
+  const healthCare = getHealthCareAllowance(householdSize, over65Count);
+  citations['B122A-2 Line 6'] = {
+    tableName: 'national_standards', household_size: householdSize,
+    amount: national, effective_date: effectiveDate, scope: 'national',
+  };
+  citations['B122A-2 Line 7'] = {
+    tableName: 'health_care', household_size: householdSize, over65: over65Count,
+    amount: healthCare, effective_date: effectiveDate, scope: 'national',
+  };
+  if (actualSecuredDebt > 0) citations['B122A-2 Line 33a'] = { manual: true, amount: actualSecuredDebt };
+  if (priorityDebt     > 0) citations['B122A-2 Line 35']   = { manual: true, amount: priorityDebt };
+
+  return {
     nationalStandards: national,
     healthCare,
     housingUtilities: housing,
+    housingScope: housingCitation.scope,
     transportation,
     securedDebt: actualSecuredDebt,
     priorityDebt,
     total: national + healthCare + housing + transportation + actualSecuredDebt + priorityDebt,
+    citations,
+    effectiveDate,
   };
-
-  return deductions;
 }
