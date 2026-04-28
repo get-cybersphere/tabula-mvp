@@ -386,6 +386,13 @@ export function MedicalRecordsTab({ caseId, onRefresh }) {
 
   const update = (field, value) => setForm(f => ({ ...f, [field]: value }));
 
+  useEffect(() => {
+    if (!showForm) return;
+    const onKey = (e) => { if (e.key === 'Escape') setShowForm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showForm]);
+
   const totalBilled = records.reduce((s, r) => s + (r.total_billed || 0), 0);
   const totalPaid = records.reduce((s, r) => s + (r.total_paid || 0), 0);
   const totalLiens = records.filter(r => r.has_lien).reduce((s, r) => s + (r.lien_amount || 0), 0);
@@ -889,6 +896,13 @@ export function SettlementTab({ caseId, onRefresh }) {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!showForm) return;
+    const onKey = (e) => { if (e.key === 'Escape') setShowForm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showForm]);
+
   const update = (field, value) => setForm(f => ({ ...f, [field]: value }));
 
   const handleSave = async () => {
@@ -1013,6 +1027,13 @@ export function PIDeadlinesTab({ caseId, onRefresh }) {
   }, [caseId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!showForm) return;
+    const onKey = (e) => { if (e.key === 'Escape') setShowForm(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showForm]);
 
   const update = (field, value) => setForm(f => ({ ...f, [field]: value }));
 

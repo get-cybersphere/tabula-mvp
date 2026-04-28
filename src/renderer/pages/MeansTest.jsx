@@ -809,10 +809,10 @@ function ReviewStep({ documents, onBack, navigate }) {
 
       {/* Save to Case Modal */}
       {showSaveModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card" style={{ width: 400, margin: 0 }}>
+        <SaveToCaseBackdrop onDismiss={() => !saving && setShowSaveModal(false)}>
+          <div className="card" style={{ width: 400, margin: 0 }} role="dialog" aria-modal="true" aria-labelledby="save-to-case-title">
             <div className="card-header">
-              <span className="card-title">Save to Case</span>
+              <span className="card-title" id="save-to-case-title">Save to Case</span>
             </div>
             <div className="card-body">
               <p className="text-sm" style={{ color: 'var(--warm-gray)', marginBottom: 16 }}>
@@ -853,8 +853,25 @@ function ReviewStep({ documents, onBack, navigate }) {
               </div>
             </div>
           </div>
-        </div>
+        </SaveToCaseBackdrop>
       )}
+    </div>
+  );
+}
+
+function SaveToCaseBackdrop({ onDismiss, children }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onDismiss?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onDismiss]);
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onDismiss?.(); }}
+    >
+      {children}
     </div>
   );
 }

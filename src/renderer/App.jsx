@@ -61,9 +61,10 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <a href="#main-content" className="skip-to-content">Skip to main content</a>
       <div className="app-shell">
         <Sidebar navigate={navigate} currentPage={route.page} />
-        <main className="main-content">
+        <main className="main-content" id="main-content" tabIndex="-1">
           {renderPage()}
         </main>
       </div>
