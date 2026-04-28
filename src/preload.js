@@ -122,6 +122,18 @@ contextBridge.exposeInMainWorld('tabula', {
     },
   },
 
+  // Plaid (sandbox-ready scaffold; phase 1 = link + token + sync)
+  plaid: {
+    isConfigured:      ()                                  => ipcRenderer.invoke('plaid:isConfigured'),
+    createLinkToken:   (caseId)                            => ipcRenderer.invoke('plaid:createLinkToken', caseId),
+    exchangeToken:     (caseId, publicToken, metadata)     => ipcRenderer.invoke('plaid:exchangeToken', caseId, publicToken, metadata),
+    listForCase:       (caseId)                            => ipcRenderer.invoke('plaid:listForCase', caseId),
+    syncTransactions:  (itemRowId)                         => ipcRenderer.invoke('plaid:syncTransactions', itemRowId),
+    disconnectItem:    (itemRowId)                         => ipcRenderer.invoke('plaid:disconnectItem', itemRowId),
+    detectIncome:      (caseId, windowStart, windowEnd)    => ipcRenderer.invoke('plaid:detectIncome', caseId, windowStart, windowEnd),
+    classifyExpenses:  (caseId, windowStart, windowEnd)    => ipcRenderer.invoke('plaid:classifyExpenses', caseId, windowStart, windowEnd),
+  },
+
   // Navigation listener (from menu bar)
   onNavigate: (callback) => {
     ipcRenderer.on('navigate', (_, path) => callback(path));

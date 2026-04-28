@@ -290,6 +290,62 @@ function initDatabase() {
     );
   `);
 
+  // ─── Plaid integration tables ──────────────────────────────────
+  // One row per (case, bank-connection). access_token is encrypted
+  // at rest via Electron safeStorage (see src/main/plaid/index.js).
+  // See docs/MEANS-TEST-V1-DESIGN.md §2.3 for design rationale.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plaid_items (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+      plaid_item_id TEXT NOT NULL,
+      access_token_encrypted BLOB NOT NULL,
+      institution_id TEXT,
+      institution_name TEXT,
+      cursor TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      consent_at TEXT NOT NULL,
+      last_synced_at TEXT,
+      error_code TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_plaid_items_case
+      ON plaid_items(case_id, status);
+
+    CREATE TABLE IF NOT EXISTS plaid_accounts (
+      id TEXT PRIMARY KEY,
+      item_id TEXT NOT NULL REFERENCES plaid_items(id) ON DELETE CASCADE,
+      plaid_account_id TEXT NOT NULL UNIQUE,
+      name TEXT,
+      official_name TEXT,
+      type TEXT,
+      subtype TEXT,
+      mask TEXT,
+      current_balance REAL,
+      available_balance REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_plaid_accounts_item
+      ON plaid_accounts(item_id);
+
+    CREATE TABLE IF NOT EXISTS plaid_transactions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES plaid_accounts(id) ON DELETE CASCADE,
+      plaid_transaction_id TEXT NOT NULL UNIQUE,
+      date TEXT NOT NULL,
+      authorized_date TEXT,
+      amount REAL NOT NULL,
+      iso_currency_code TEXT,
+      name TEXT,
+      merchant_name TEXT,
+      pending INTEGER DEFAULT 0,
+      category_primary TEXT,
+      category_detailed TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_plaid_txns_account_date
+      ON plaid_transactions(account_id, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_plaid_txns_category
+      ON plaid_transactions(category_primary);
+  `);
+
   seedDemoData();
 }
 
@@ -1626,6 +1682,83 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
   ipcMain.handle('pi:statutes:delete', (_, id) => {
     db.prepare('DELETE FROM pi_statutes WHERE id = ?').run(id);
     return { success: true };
+  });
+
+  // ─── Plaid integration IPC ─────────────────────────────────────
+  // The renderer never sees an access_token. Every operation that
+  // touches the live Plaid client runs in this process.
+  const plaid = require('./main/plaid');
+
+  ipcMain.handle('plaid:isConfigured', () => {
+    return { configured: plaid.isConfigured() };
+  });
+
+  ipcMain.handle('plaid:createLinkToken', async (_, caseId) => {
+    try {
+      const link_token = await plaid.createLinkToken({ caseId });
+      return { link_token };
+    } catch (err) {
+      console.error('[plaid] createLinkToken failed:', err.message);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('plaid:exchangeToken', async (_, caseId, publicToken, metadata) => {
+    try {
+      const result = await plaid.exchangePublicToken({ db, caseId, publicToken, metadata });
+      logCaseEvent(caseId, 'plaid_connected',
+        `Connected to ${result.institutionName} (${result.accountCount} account${result.accountCount === 1 ? '' : 's'})`,
+        { item_id: result.itemId, institution: result.institutionName });
+      return result;
+    } catch (err) {
+      console.error('[plaid] exchangeToken failed:', err.message);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('plaid:listForCase', (_, caseId) => {
+    return plaid.listForCase({ db, caseId });
+  });
+
+  ipcMain.handle('plaid:syncTransactions', async (_, itemRowId) => {
+    try {
+      const item = db.prepare('SELECT case_id FROM plaid_items WHERE id = ?').get(itemRowId);
+      const result = await plaid.syncItemTransactions({ db, itemRowId });
+      if (item) {
+        logCaseEvent(item.case_id, 'plaid_synced',
+          `Plaid sync: +${result.added} added, ${result.modified} modified, ${result.removed} removed`,
+          { item_id: itemRowId, ...result });
+      }
+      return result;
+    } catch (err) {
+      console.error('[plaid] sync failed:', err.message);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('plaid:disconnectItem', async (_, itemRowId) => {
+    try {
+      const item = db.prepare('SELECT case_id, institution_name FROM plaid_items WHERE id = ?').get(itemRowId);
+      const result = await plaid.disconnectItem({ db, itemRowId });
+      if (item) {
+        logCaseEvent(item.case_id, 'plaid_disconnected',
+          `Disconnected from ${item.institution_name}`, { item_id: itemRowId });
+      }
+      return result;
+    } catch (err) {
+      console.error('[plaid] disconnect failed:', err.message);
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('plaid:detectIncome', (_, caseId, windowStart, windowEnd) => {
+    const { detectIncomeReceipts } = require('./main/plaid/income-detector');
+    return detectIncomeReceipts({ db, caseId, windowStart, windowEnd });
+  });
+
+  ipcMain.handle('plaid:classifyExpenses', (_, caseId, windowStart, windowEnd) => {
+    const { classifyExpenses } = require('./main/plaid/expense-classifier');
+    return classifyExpenses({ db, caseId, windowStart, windowEnd });
   });
 }
 

@@ -6,6 +6,7 @@ import { computeCompleteness } from '../lib/case-completeness.js';
 import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
+import PlaidConnectCard from '../components/Plaid/PlaidConnectCard.jsx';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -1111,6 +1112,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
 
   return (
     <div>
+      <PlaidConnectCard caseId={caseId} />
       {/* Means Test Parameters & Run */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-header">
