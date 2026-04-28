@@ -6,6 +6,7 @@ import CaseDetail from './pages/CaseDetail.jsx';
 import MeansTest from './pages/MeansTest.jsx';
 import Analytics from './pages/Analytics.jsx';
 import TabulaAI from './pages/TabulaAI.jsx';
+import { ToastProvider } from './lib/toast.jsx';
 
 export default function App() {
   const [route, setRoute] = useState({ page: 'dashboard', params: {} });
@@ -59,11 +60,14 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <Sidebar navigate={navigate} currentPage={route.page} />
-      <main className="main-content">
-        {renderPage()}
-      </main>
-    </div>
+    <ToastProvider>
+      <a href="#main-content" className="skip-to-content">Skip to main content</a>
+      <div className="app-shell">
+        <Sidebar navigate={navigate} currentPage={route.page} />
+        <main className="main-content" id="main-content" tabIndex="-1">
+          {renderPage()}
+        </main>
+      </div>
+    </ToastProvider>
   );
 }

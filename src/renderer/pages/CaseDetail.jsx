@@ -6,6 +6,9 @@ import { computeCompleteness } from '../lib/case-completeness.js';
 import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
+import { useToast } from '../lib/toast.jsx';
+import { confirmAction } from '../lib/confirm.js';
+import { personLabel } from '../lib/terminology.js';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -43,6 +46,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
   const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const [loading, setLoading] = useState(true);
   const [aiOpen, setAiOpen] = useState(false);
+  const toast = useToast();
 
   const loadCase = useCallback(async () => {
     setLoading(true);
@@ -56,8 +60,13 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
   }, [loadCase]);
 
   const handleStatusChange = async (newStatus) => {
-    await window.tabula.cases.update(caseId, { status: newStatus });
-    loadCase();
+    try {
+      await window.tabula.cases.update(caseId, { status: newStatus });
+      toast.success(`Status changed to ${STATUS_LABELS[newStatus] || newStatus}`);
+      loadCase();
+    } catch (err) {
+      toast.error(`Could not update status: ${err.message || 'unknown error'}`);
+    }
   };
 
   const handleUploadDocuments = async () => {
@@ -92,15 +101,50 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
 
   const debtor = caseData.debtors?.[0] || {};
 
+  const isPIBreadcrumb = caseData.practice_type === 'personal_injury';
+  const breadcrumbTabs = isPIBreadcrumb ? PI_TABS : BANKRUPTCY_TABS;
+  const activeTabLabel = breadcrumbTabs.find(t => t.key === activeTab)?.label;
+  const debtorName = `${debtor.first_name || ''} ${debtor.last_name || ''}`.trim() || 'Case';
+
   return (
     <div className="page">
-      {/* Back + Header */}
-      <button className="btn btn-ghost" onClick={() => navigate('/')} style={{ marginBottom: 16 }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-          <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
-        </svg>
-        All Cases
-      </button>
+      {/* Breadcrumb */}
+      <nav aria-label="Breadcrumb" style={{ marginBottom: 16 }}>
+        <ol style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          listStyle: 'none', padding: 0, margin: 0,
+          fontSize: '0.85rem', color: 'var(--warm-gray)',
+        }}>
+          <li>
+            <button
+              onClick={() => navigate('/')}
+              className="btn-ghost-link"
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                color: 'var(--warm-gray)', fontFamily: 'inherit', fontSize: 'inherit',
+              }}
+            >
+              Cases
+            </button>
+          </li>
+          <li aria-hidden="true" style={{ color: 'rgba(10,10,10,0.25)' }}>/</li>
+          <li>
+            <span style={{ color: 'var(--ink)', fontWeight: 500 }} aria-current={activeTabLabel ? undefined : 'page'}>
+              {debtorName}
+            </span>
+          </li>
+          {activeTabLabel && (
+            <>
+              <li aria-hidden="true" style={{ color: 'rgba(10,10,10,0.25)' }}>/</li>
+              <li>
+                <span style={{ color: 'var(--ink)', fontWeight: 500 }} aria-current="page">
+                  {activeTabLabel}
+                </span>
+              </li>
+            </>
+          )}
+        </ol>
+      </nav>
 
       <div className="case-header">
         <div>
@@ -187,7 +231,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
             </div>
 
             {/* Shared tabs */}
-            {activeTab === 'overview' && <OverviewTab caseData={caseData} debtor={debtor} caseId={caseId} onRefresh={loadCase} />}
+            {activeTab === 'overview' && <OverviewTab caseData={caseData} debtor={debtor} caseId={caseId} onRefresh={loadCase} onJumpTo={setActiveTab} />}
             {activeTab === 'timeline' && <TimelineTab caseId={caseId} />}
             {activeTab === 'documents' && <DocumentsTab caseData={caseData} onUpload={handleUploadDocuments} onExtract={handleExtract} />}
             {activeTab === 'review' && <ReviewTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
@@ -220,7 +264,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
 
 /* ─── Overview Tab ─────────────────────────────────────────── */
 
-function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
+function OverviewTab({ caseData, debtor, caseId, onRefresh, onJumpTo }) {
   const totalDebt = (caseData.creditors || []).reduce((sum, c) => sum + (c.amount_claimed || 0), 0);
   const totalAssets = (caseData.assets || []).reduce((sum, a) => sum + (a.current_value || 0), 0);
   const monthlyIncome = (caseData.income || []).reduce((sum, i) => sum + (i.gross_monthly || 0), 0);
@@ -269,6 +313,7 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
   };
 
   const handleRemoveJointDebtor = async (id) => {
+    if (!confirmAction('Remove the joint debtor from this case? This cannot be undone.')) return;
     await window.tabula.debtors.delete(id);
     onRefresh();
   };
@@ -336,7 +381,7 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="card">
           <div className="card-header">
-            <span className="card-title">{isPI ? 'Client Information' : 'Debtor Information'}</span>
+            <span className="card-title">{personLabel(caseData.practice_type)} Information</span>
             {!editingInfo && (
               <button className="btn btn-sm btn-secondary" onClick={() => setEditingInfo(true)}>Edit</button>
             )}
@@ -527,7 +572,7 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
 
       <DeadlinesCard caseData={caseData} />
 
-      {!isPI && <CompletenessPanel caseData={caseData} />}
+      {!isPI && <CompletenessPanel caseData={caseData} onJumpTo={onJumpTo} />}
     </div>
   );
 }
@@ -536,9 +581,27 @@ function OverviewTab({ caseData, debtor, caseId, onRefresh }) {
  * Detailed completeness panel — shows score, what's done, and what's missing
  * with specific hints. Drives the "what's missing per client" pain point.
  */
-function CompletenessPanel({ caseData }) {
+// Maps a completeness item's `key` to the tab that resolves it.
+const COMPLETENESS_KEY_TO_TAB = {
+  debtor_identity: 'overview',
+  debtor_address: 'overview',
+  income: 'means-test',
+  expenses: 'means-test',
+  creditors: 'creditors',
+  assets: 'assets',
+  supporting_docs: 'documents',
+  required_doc_types: 'documents',
+  review_flags: 'review',
+};
+
+function CompletenessPanel({ caseData, onJumpTo }) {
   const completeness = computeCompleteness(caseData);
   const { score, readyToFile, items, missing, completedItems, totalItems } = completeness;
+
+  const jumpTo = (key) => {
+    const tab = COMPLETENESS_KEY_TO_TAB[key];
+    if (tab && onJumpTo) onJumpTo(tab);
+  };
 
   const barColor =
     readyToFile ? 'var(--sage)' :
@@ -583,24 +646,44 @@ function CompletenessPanel({ caseData }) {
             <div className="text-sm" style={{ fontWeight: 600, marginBottom: 10, color: 'var(--accent)' }}>
               Missing ({missing.length})
             </div>
-            {missing.map((m) => (
-              <div key={m.key} style={{
-                display: 'flex', gap: 10, padding: '8px 12px',
-                background: 'rgba(196, 124, 72, 0.06)',
-                borderLeft: '3px solid var(--accent)',
-                borderRadius: 4, marginBottom: 6,
-              }}>
-                <span style={{ color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }}>!</span>
-                <div>
-                  <div className="text-sm" style={{ fontWeight: 500 }}>{m.label}</div>
-                  {m.hint && (
-                    <div className="text-xs" style={{ color: 'var(--warm-gray)', marginTop: 2 }}>
-                      {m.hint}
-                    </div>
+            {missing.map((m) => {
+              const targetTab = COMPLETENESS_KEY_TO_TAB[m.key];
+              const isClickable = !!targetTab && !!onJumpTo;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => jumpTo(m.key)}
+                  disabled={!isClickable}
+                  aria-label={`${m.label} — fix in ${targetTab || 'this tab'}`}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    display: 'flex', gap: 10, padding: '8px 12px',
+                    background: 'rgba(196, 124, 72, 0.06)',
+                    borderLeft: '3px solid var(--accent)',
+                    border: 'none', borderRadius: 4, marginBottom: 6,
+                    cursor: isClickable ? 'pointer' : 'default',
+                    fontFamily: 'inherit',
+                    transition: 'background 120ms ease',
+                  }}
+                  onMouseEnter={(e) => { if (isClickable) e.currentTarget.style.background = 'rgba(196, 124, 72, 0.12)'; }}
+                  onMouseLeave={(e) => { if (isClickable) e.currentTarget.style.background = 'rgba(196, 124, 72, 0.06)'; }}
+                >
+                  <span style={{ color: 'var(--accent)', fontWeight: 600, flexShrink: 0 }} aria-hidden="true">!</span>
+                  <div style={{ flex: 1 }}>
+                    <div className="text-sm" style={{ fontWeight: 500 }}>{m.label}</div>
+                    {m.hint && (
+                      <div className="text-xs" style={{ color: 'var(--warm-gray)', marginTop: 2 }}>
+                        {m.hint}
+                      </div>
+                    )}
+                  </div>
+                  {isClickable && (
+                    <span aria-hidden="true" style={{ color: 'var(--accent)', flexShrink: 0, alignSelf: 'center' }}>→</span>
                   )}
-                </div>
-              </div>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -1080,6 +1163,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   };
 
   const handleDeleteIncome = async (id) => {
+    if (!confirmAction('Delete this income entry?')) return;
     await window.tabula.income.delete(id);
     setShowResult(false);
     onRefresh();
@@ -1099,6 +1183,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   };
 
   const handleDeleteExpense = async (id) => {
+    if (!confirmAction('Delete this expense entry?')) return;
     await window.tabula.expenses.delete(id);
     setShowResult(false);
     onRefresh();
@@ -1274,7 +1359,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span className="text-mono text-sm">${(i.gross_monthly || 0).toLocaleString()}/mo</span>
-                  <button className="btn btn-sm btn-ghost" onClick={() => handleDeleteIncome(i.id)} style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
+                  <button className="btn btn-sm btn-ghost" aria-label="Delete income source" onClick={() => handleDeleteIncome(i.id)} style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
                     x
                   </button>
                 </div>
@@ -1338,7 +1423,7 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <span className="text-mono text-sm">${(e.monthly_amount || 0).toLocaleString()}/mo</span>
-                  <button className="btn btn-sm btn-ghost" onClick={() => handleDeleteExpense(e.id)} style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
+                  <button className="btn btn-sm btn-ghost" aria-label="Delete expense" onClick={() => handleDeleteExpense(e.id)} style={{ padding: '2px 6px', fontSize: '0.75rem', color: 'var(--warm-gray)' }}>
                     x
                   </button>
                 </div>
@@ -1384,7 +1469,7 @@ function ReviewTab({ caseData, caseId, onRefresh }) {
               <label className="form-label">Section</label>
               <select className="form-select" value={section} onChange={(e) => setSection(e.target.value)}>
                 <option value="general">General</option>
-                <option value="debtor_info">Debtor Information</option>
+                <option value="debtor_info">{personLabel(caseData.practice_type)} Information</option>
                 <option value="income">Income</option>
                 <option value="expenses">Expenses</option>
                 <option value="creditors">Creditors</option>

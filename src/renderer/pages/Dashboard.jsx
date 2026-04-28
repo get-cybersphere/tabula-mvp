@@ -59,6 +59,7 @@ export default function Dashboard({ navigate, initialFilter }) {
   const [stats, setStats] = useState({ total: 0, intake: 0, inProgress: 0, ready: 0, filed: 0 });
   const [statusFilter, setStatusFilter] = useState(initialFilter || 'all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   const [recentEvents, setRecentEvents] = useState([]);
   const [allCases, setAllCases] = useState([]);
@@ -66,7 +67,7 @@ export default function Dashboard({ navigate, initialFilter }) {
   const loadData = useCallback(async () => {
     // Load all cases (for deadlines) + filtered cases (for the table) + stats + recent activity.
     const [caseList, overview, allCaseList, events] = await Promise.all([
-      window.tabula.cases.list({ status: statusFilter, search }),
+      window.tabula.cases.list({ status: statusFilter, search: debouncedSearch }),
       window.tabula.stats.overview(),
       window.tabula.cases.list({ status: 'all', search: '' }),
       window.tabula.events.recent(12),
@@ -75,15 +76,22 @@ export default function Dashboard({ navigate, initialFilter }) {
     setStats(overview);
     setAllCases(allCaseList);
     setRecentEvents(events || []);
-  }, [statusFilter, search]);
+  }, [statusFilter, debouncedSearch]);
 
   useEffect(() => {
     if (initialFilter) setStatusFilter(initialFilter);
   }, [initialFilter]);
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const isSearching = debouncedSearch.trim().length > 0 || statusFilter !== 'all';
 
   const formatDate = (dateStr) => {
     try {
@@ -123,7 +131,7 @@ export default function Dashboard({ navigate, initialFilter }) {
           <div className="stat-label">In Progress</div>
           <div className="stat-value" style={{ color: 'var(--amber)' }}>{stats.inProgress}</div>
         </div>
-        <div className="stat-card accent">
+        <div className="stat-card sage">
           <div className="stat-label">Ready to File</div>
           <div className="stat-value">{stats.ready}</div>
         </div>
@@ -164,7 +172,7 @@ export default function Dashboard({ navigate, initialFilter }) {
           <table>
             <thead>
               <tr>
-                <th>Debtor</th>
+                <th>Name</th>
                 <th>Chapter</th>
                 <th>District</th>
                 <th>Status</th>
@@ -200,6 +208,19 @@ export default function Dashboard({ navigate, initialFilter }) {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : isSearching ? (
+        <div className="card">
+          <div className="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <h3>No matching cases</h3>
+            <p>Try a different search term or status filter.</p>
+            <button className="btn btn-secondary" onClick={() => { setSearch(''); setStatusFilter('all'); }}>
+              Clear filters
+            </button>
+          </div>
         </div>
       ) : (
         <div className="card">
