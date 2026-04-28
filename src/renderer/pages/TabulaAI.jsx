@@ -4,13 +4,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
    Full-page AI co-counsel. Clean, minimal, high-end.
 ──────────────────────────────────────────────────────────────── */
 
+// Only sources that are actually wired into the AI context.
+// Add new ones here once they're connected to the main process.
 const SOURCES = [
   { key: 'case_files', label: 'Case Files', color: '#3b6cb5', connected: true },
-  { key: 'pacer', label: 'PACER', color: '#0a0a0a', connected: true },
-  { key: 'irs', label: 'IRS Standards', color: '#4a6354', connected: true },
-  { key: 'state_law', label: 'State Law', color: '#b8860b', connected: true },
-  { key: 'web', label: 'Web Search', color: '#3b6cb5', connected: true },
-  { key: 'westlaw', label: 'Westlaw', color: '#c4553a', connected: false },
 ];
 
 const WORKFLOWS = {

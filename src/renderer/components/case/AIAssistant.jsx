@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { confirmAction } from '../../lib/confirm.js';
 
 /**
  * AI Case Assistant — slide-out panel with Claude-powered contextual chat.
@@ -60,6 +61,7 @@ export default function AIAssistant({ caseId, practiceType, isOpen, onClose }) {
   }, [input, loading, caseId]);
 
   const handleClear = async () => {
+    if (!confirmAction('Clear this conversation? This cannot be undone.')) return;
     await window.tabula.ai.clear(caseId);
     setMessages([]);
   };
@@ -84,6 +86,13 @@ export default function AIAssistant({ caseId, practiceType, isOpen, onClose }) {
         'Draft a case memo',
         'What issues should I flag?',
       ];
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -112,13 +121,13 @@ export default function AIAssistant({ caseId, practiceType, isOpen, onClose }) {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {messages.length > 0 && (
-            <button className="btn btn-ghost btn-sm" onClick={handleClear} title="Clear conversation">
+            <button className="btn btn-ghost btn-sm" onClick={handleClear} title="Clear conversation" aria-label="Clear conversation">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
               </svg>
             </button>
           )}
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close assistant">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -208,6 +217,7 @@ export default function AIAssistant({ caseId, practiceType, isOpen, onClose }) {
           className="btn btn-primary btn-sm"
           onClick={handleSend}
           disabled={loading || !input.trim()}
+          aria-label="Send message"
           style={{ padding: '8px 14px' }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

@@ -1,5 +1,72 @@
 /* ─── Tabula Design System ──────────────────────────────────── */
 
+/* WCAG 2.2 baseline: keyboard focus ring on every interactive element.
+   Uses :focus-visible so mouse users don't see it, keyboard users do. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+button:focus-visible,
+[role="button"]:focus-visible,
+.btn:focus-visible,
+.filter-pill:focus-visible,
+.sidebar-link:focus-visible,
+.sidebar-create-btn:focus-visible {
+  outline-offset: 3px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.form-input:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 0;
+  border-color: var(--blue);
+}
+
+/* Respect reduced-motion preference (WCAG 2.3.3 + 2.2 best practice) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skip-to-content link: visible only on focus, lets keyboard/screen-reader
+   users bypass the sidebar nav. */
+.skip-to-content {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 10px 16px;
+  z-index: 10000;
+  text-decoration: none;
+  border-radius: 0 0 6px 0;
+  font-size: 0.9rem;
+}
+.skip-to-content:focus {
+  top: 0;
+}
+
+/* Visually-hidden utility for screen-reader-only labels */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 :root {
   --ink: #0a0a0a;
   --paper: #f6f4f0;
