@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { confirmAction } from '../../lib/confirm.js';
 
 /* ─── PI Workflow Tabs ─────────────────────────────────────────
    Full personal-injury workflow module: accident details, medical
@@ -377,6 +378,7 @@ export function MedicalRecordsTab({ caseId, onRefresh }) {
   };
 
   const handleDelete = async (id) => {
+    if (!confirmAction('Delete this medical record? This cannot be undone.')) return;
     await window.tabula.pi.medical.delete(id);
     load();
     onRefresh?.();
@@ -901,6 +903,7 @@ export function SettlementTab({ caseId, onRefresh }) {
   };
 
   const handleDelete = async (id) => {
+    if (!confirmAction('Delete this settlement entry?')) return;
     await window.tabula.pi.settlements.delete(id);
     load();
   };
@@ -1021,6 +1024,7 @@ export function PIDeadlinesTab({ caseId, onRefresh }) {
   };
 
   const handleDelete = async (id) => {
+    if (!confirmAction('Delete this statute / deadline entry?')) return;
     await window.tabula.pi.statutes.delete(id);
     load();
   };
