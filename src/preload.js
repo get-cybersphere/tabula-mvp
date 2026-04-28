@@ -69,6 +69,17 @@ contextBridge.exposeInMainWorld('tabula', {
     uploadFiles: () => ipcRenderer.invoke('means-test:upload-files'),
     extract: (filePath, docCategory) => ipcRenderer.invoke('means-test:extract', filePath, docCategory),
     checkApiKey: () => ipcRenderer.invoke('means-test:check-api-key'),
+    // v1: provenance graph
+    listReceipts: (caseId) => ipcRenderer.invoke('meansTest:listReceipts', caseId),
+    upsertReceipt: (caseId, receipt) => ipcRenderer.invoke('meansTest:upsertReceipt', caseId, receipt),
+    deleteReceipt: (id) => ipcRenderer.invoke('meansTest:deleteReceipt', id),
+    listManualDeductions: (caseId) => ipcRenderer.invoke('meansTest:listManualDeductions', caseId),
+    upsertManualDeduction: (caseId, ded) => ipcRenderer.invoke('meansTest:upsertManualDeduction', caseId, ded),
+    deleteManualDeduction: (id) => ipcRenderer.invoke('meansTest:deleteManualDeduction', id),
+    saveRun: (caseId, runData) => ipcRenderer.invoke('meansTest:saveRun', caseId, runData),
+    listRuns: (caseId) => ipcRenderer.invoke('meansTest:listRuns', caseId),
+    exportAuditPacket: (caseId, runId) => ipcRenderer.invoke('meansTest:exportAuditPacket', caseId, runId),
+    exportB122A: (caseId, runId) => ipcRenderer.invoke('meansTest:exportB122A', caseId, runId),
   },
 
   // Notes
