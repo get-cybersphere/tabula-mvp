@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getAllStates } from '../lib/median-income.js';
 import { runMeansTest, aggregateExtractedData } from '../lib/means-test.js';
+import UnhandledLinesBanner, { ResultGate } from '../components/MeansTest/UnhandledLinesBanner.jsx';
 
 const STATES = getAllStates();
 
@@ -456,8 +457,36 @@ function ReviewStep({ documents, onBack, navigate }) {
       ? 'Chapter 13 Recommended'
       : 'Additional Analysis Needed';
 
+  // ─── Unhandled-line acknowledgment state ──────────────────────
+  // Every unhandled B122A-2 line must be either entered (as a
+  // manual_deduction) or explicitly acknowledged "Not applicable"
+  // before the result panel is shown. Protects against silent
+  // omissions that would inflate disposable income.
+  // See docs/MEANS-TEST-V1-DESIGN.md §5.6.
+  const [acknowledged, setAcknowledged] = useState(() => new Set());
+  const acknowledge   = (line) => setAcknowledged(prev => { const n = new Set(prev); n.add(line);    return n; });
+  const unacknowledge = (line) => setAcknowledged(prev => { const n = new Set(prev); n.delete(line); return n; });
+  const enterValue = (line) => {
+    // Manual-deduction entry UI ships with the unified MeansTestWorkspace
+    // (Sprint 4). Until then, attorneys can mark the line Not Applicable
+    // or wait for the entry form.
+    window.alert(
+      `Manual entry for ${line} is not yet wired in this view.\n\n` +
+      `For now, mark "Not applicable" or enter the value once the unified workspace ships.`
+    );
+  };
+  const unhandledList = meansResult.unhandled || [];
+  const unresolvedCount = unhandledList.filter(u => !u.handled && !acknowledged.has(u.line)).length;
+
   return (
     <div className="mt-fade-in">
+      <UnhandledLinesBanner
+        unhandled={unhandledList}
+        acknowledgments={acknowledged}
+        onAcknowledge={acknowledge}
+        onUnacknowledge={unacknowledge}
+        onEnterValue={enterValue}
+      />
       {/* Summary Cards */}
       <div className="mt-summary-cards">
         <div className="mt-summary-card">
@@ -515,7 +544,8 @@ function ReviewStep({ documents, onBack, navigate }) {
       <div className="mt-review-grid">
         {/* Left: Result + Math */}
         <div>
-          {/* Recommendation */}
+          {/* Recommendation — gated until unhandled lines are resolved */}
+          <ResultGate unresolvedCount={unresolvedCount}>
           <div className="mt-result-card" style={{ marginBottom: 20 }}>
             <div className={`mt-result-header ${meansResult.recommendation}`}>
               <div className="mt-result-badge">
@@ -544,6 +574,7 @@ function ReviewStep({ documents, onBack, navigate }) {
               )}
             </div>
           </div>
+          </ResultGate>
 
           {/* Math Breakdown */}
           <div className="card">

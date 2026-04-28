@@ -290,6 +290,91 @@ function initDatabase() {
     );
   `);
 
+  // ─── Means Test v1: provenance-graph tables ───────────────────
+  // Receipt-level income for statutory 6-month CMI averaging.
+  // (See docs/MEANS-TEST-V1-DESIGN.md §4.1)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS income_receipts (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+      document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+      source_page INTEGER,
+      pay_date TEXT NOT NULL,
+      pay_period_start TEXT,
+      pay_period_end TEXT,
+      gross_amount REAL NOT NULL,
+      source_label TEXT,
+      income_type TEXT,
+      manual_entry INTEGER NOT NULL DEFAULT 0,
+      entered_by TEXT,
+      entered_at TEXT,
+      notes TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_income_receipts_case_date
+      ON income_receipts(case_id, pay_date DESC);
+
+    CREATE TABLE IF NOT EXISTS tax_withholdings (
+      id TEXT PRIMARY KEY,
+      receipt_id TEXT NOT NULL REFERENCES income_receipts(id) ON DELETE CASCADE,
+      withholding_type TEXT NOT NULL,
+      amount REAL NOT NULL,
+      label TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_withholdings_receipt
+      ON tax_withholdings(receipt_id);
+
+    CREATE TABLE IF NOT EXISTS irs_standard_refs (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+      b122a_line TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      effective_date TEXT NOT NULL,
+      county_fips TEXT,
+      state_code TEXT,
+      household_size INTEGER,
+      amount REAL NOT NULL,
+      source_url TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS manual_deductions (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+      b122a_line TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT,
+      monthly_amount REAL NOT NULL,
+      supporting_doc_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+      entered_by TEXT,
+      entered_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS means_test_runs (
+      id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+      run_at TEXT NOT NULL,
+      cmi REAL,
+      median_income REAL,
+      household_size INTEGER,
+      state_code TEXT,
+      county_fips TEXT,
+      result TEXT,
+      computed_json TEXT,
+      unhandled_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_means_test_runs_case
+      ON means_test_runs(case_id, run_at DESC);
+  `);
+
+  // documents: optional date-range columns for "all receipts inside the
+  // 6-month window" queries on multi-page bundles.
+  const docCols = db.prepare("PRAGMA table_info(documents)").all().map(c => c.name);
+  if (!docCols.includes('effective_date_range_start')) {
+    db.prepare("ALTER TABLE documents ADD COLUMN effective_date_range_start TEXT").run();
+  }
+  if (!docCols.includes('effective_date_range_end')) {
+    db.prepare("ALTER TABLE documents ADD COLUMN effective_date_range_end TEXT").run();
+  }
+
   seedDemoData();
 }
 
@@ -461,25 +546,53 @@ Return ONLY valid JSON, no markdown fences or explanation.`;
     case 'paystub':
       return `${baseInstruction}
 
-Extract from this paystub:
+This document may contain ONE OR MULTIPLE paystubs (e.g. a 6-month bundle).
+Return an ARRAY of paystub objects, one per pay date detected. Each entry
+maps to a single payroll receipt and must include its source PDF page.
+
+For Means Test (11 U.S.C. § 101(10A)) we need every individual receipt with
+its pay_date — DO NOT pre-aggregate or annualize.
+
+Format:
 {
   "type": "paystub",
-  "employer": "employer name",
-  "payPeriod": "MM/DD/YYYY - MM/DD/YYYY",
-  "payFrequency": "weekly|biweekly|semimonthly|monthly",
-  "grossPay": 0.00,
-  "federalTax": 0.00,
-  "stateTax": 0.00,
-  "socialSecurity": 0.00,
-  "medicare": 0.00,
-  "healthInsurance": 0.00,
-  "retirement401k": 0.00,
-  "otherDeductions": 0.00,
-  "garnishments": 0.00,
-  "netPay": 0.00,
-  "ytdGross": 0.00,
-  "ytdNet": 0.00
-}`;
+  "stubs": [
+    {
+      "employer": "employer name",
+      "pay_period_start": "YYYY-MM-DD",
+      "pay_period_end":   "YYYY-MM-DD",
+      "pay_date":         "YYYY-MM-DD",
+      "pay_frequency":    "weekly|biweekly|semimonthly|monthly",
+      "gross_pay":        0.00,
+      "net_pay":          0.00,
+      "ytd_gross":        0.00,
+      "ytd_net":          0.00,
+      "source_pdf_page":  1,
+      "withholdings": [
+        { "type": "fed_income", "amount": 0.00, "label": "Federal Income Tax" },
+        { "type": "fica",       "amount": 0.00, "label": "Social Security" },
+        { "type": "medicare",   "amount": 0.00, "label": "Medicare" },
+        { "type": "state",      "amount": 0.00, "label": "State Withholding" },
+        { "type": "local",      "amount": 0.00, "label": "City/Local Tax" },
+        { "type": "garnishment","amount": 0.00, "label": "verbatim line label" }
+      ],
+      "voluntary_deductions": [
+        { "type": "401k",            "amount": 0.00 },
+        { "type": "health_insurance","amount": 0.00 },
+        { "type": "dental",          "amount": 0.00 },
+        { "type": "life_insurance",  "amount": 0.00 }
+      ],
+      "confidence": "high|medium|low"
+    }
+  ]
+}
+
+Rules:
+- One object per stub. If the PDF has 12 stubs, return 12 entries.
+- Only include withholding/voluntary_deductions lines that actually appear.
+- pay_date is REQUIRED. Without it the receipt cannot be used for CMI.
+- Use ISO dates (YYYY-MM-DD) — never MM/DD/YYYY.
+- "garnishment" type captures court-ordered support, child support, levies.`;
 
     case 'bank_statement':
       return `${baseInstruction}
@@ -679,21 +792,119 @@ async function extractWithClaude(filePath, docCategory, debtorContext = {}) {
 }
 
 // ─── Auto-populate case data from extraction ─────────────────
-function populateCaseFromExtraction(caseId, docType, extracted) {
+function legacyStubAsReceipt(legacy) {
+  // Map the old { grossPay, payFrequency, ... } shape into a single receipt
+  // anchored to today so existing tests / fixtures keep passing.
+  return {
+    employer: legacy.employer || 'Employment',
+    pay_date: legacy.payDate || new Date().toISOString().slice(0, 10),
+    pay_period_start: null,
+    pay_period_end: null,
+    pay_frequency: (legacy.payFrequency || 'biweekly').toLowerCase(),
+    gross_pay: Number(legacy.grossPay) || 0,
+    net_pay:   Number(legacy.netPay)   || 0,
+    ytd_gross: Number(legacy.ytdGross) || null,
+    source_pdf_page: 1,
+    withholdings: [
+      legacy.federalTax     != null ? { type: 'fed_income', amount: legacy.federalTax,     label: 'Federal Income Tax' } : null,
+      legacy.stateTax       != null ? { type: 'state',      amount: legacy.stateTax,       label: 'State Withholding' } : null,
+      legacy.socialSecurity != null ? { type: 'fica',       amount: legacy.socialSecurity, label: 'Social Security' } : null,
+      legacy.medicare       != null ? { type: 'medicare',   amount: legacy.medicare,       label: 'Medicare' } : null,
+      legacy.garnishments   != null ? { type: 'garnishment',amount: legacy.garnishments,   label: 'Garnishment' } : null,
+    ].filter(Boolean),
+    voluntary_deductions: [
+      legacy.healthInsurance != null ? { type: 'health_insurance', amount: legacy.healthInsurance } : null,
+      legacy.retirement401k  != null ? { type: '401k',             amount: legacy.retirement401k } : null,
+    ].filter(Boolean),
+  };
+}
+
+function monthsBetween(startISO, endISO) {
+  if (!startISO || !endISO) return null;
+  const s = new Date(startISO), e = new Date(endISO);
+  if (isNaN(s) || isNaN(e)) return null;
+  const months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
+  return Math.max(1, months);
+}
+
+// For paystubs, the new design returns an array of receipts with their
+// own withholdings — we write each receipt individually so the means test
+// can compute statutory CMI from the 6-month receipt window.
+function populateCaseFromExtraction(caseId, docType, extracted, documentId = null) {
   const { v4: uuid } = require('uuid');
 
   if (docType === 'pay_stub' || extracted.type === 'paystub') {
-    // Convert gross pay to monthly based on frequency
-    const freq = (extracted.payFrequency || 'biweekly').toLowerCase();
-    const multipliers = { weekly: 4.33, biweekly: 2.167, semimonthly: 2, monthly: 1, annual: 1/12 };
-    const mult = multipliers[freq] || 1;
-    const grossMonthly = (extracted.grossPay || 0) * mult;
-    const netMonthly = (extracted.netPay || 0) * mult;
+    // New shape: { type: 'paystub', stubs: [...] }
+    // Legacy shape: { type: 'paystub', grossPay, payFrequency, ... }  ← keep working
+    const stubs = Array.isArray(extracted.stubs) ? extracted.stubs : [legacyStubAsReceipt(extracted)];
+    let earliest = null;
+    let latest = null;
 
-    db.prepare('INSERT INTO income (id, case_id, source, employer_name, gross_monthly, net_monthly, pay_frequency) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      uuid(), caseId, 'Employment', extracted.employer || 'Unknown Employer',
-      Math.round(grossMonthly * 100) / 100, Math.round(netMonthly * 100) / 100, freq
-    );
+    for (const stub of stubs) {
+      if (!stub || !stub.pay_date) continue;
+      const receiptId = uuid();
+      db.prepare(`
+        INSERT INTO income_receipts (
+          id, case_id, document_id, source_page,
+          pay_date, pay_period_start, pay_period_end,
+          gross_amount, source_label, income_type,
+          manual_entry, entered_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      `).run(
+        receiptId, caseId, documentId, stub.source_pdf_page || null,
+        stub.pay_date, stub.pay_period_start || null, stub.pay_period_end || null,
+        Number(stub.gross_pay) || 0,
+        stub.employer || 'Employment',
+        'wages',
+        new Date().toISOString()
+      );
+
+      // Withholdings
+      const withholdings = [
+        ...(stub.withholdings || []),
+        ...(stub.voluntary_deductions || []).map(v => ({ ...v, _voluntary: true })),
+      ];
+      for (const w of withholdings) {
+        const amt = Number(w.amount) || 0;
+        if (!amt) continue;
+        db.prepare(`
+          INSERT INTO tax_withholdings (id, receipt_id, withholding_type, amount, label)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(uuid(), receiptId, w.type || 'other', amt, w.label || null);
+      }
+
+      if (!earliest || stub.pay_date < earliest) earliest = stub.pay_date;
+      if (!latest   || stub.pay_date > latest)   latest   = stub.pay_date;
+    }
+
+    // Stamp the document's effective date range so we can find "all
+    // receipts inside the 6-month window" in subsequent queries.
+    if (documentId && earliest) {
+      db.prepare(`
+        UPDATE documents
+        SET effective_date_range_start = ?, effective_date_range_end = ?
+        WHERE id = ?
+      `).run(earliest, latest, documentId);
+    }
+
+    // Backward compatibility: keep an aggregated row in `income` so the
+    // existing UI continues to render until the unified workspace ships.
+    if (stubs.length > 0) {
+      const totalGross = stubs.reduce((s, x) => s + (Number(x.gross_pay) || 0), 0);
+      const totalNet   = stubs.reduce((s, x) => s + (Number(x.net_pay)   || 0), 0);
+      const months = Math.max(1, monthsBetween(earliest, latest) || 1);
+      const employer = stubs[0].employer || 'Employment';
+      const frequency = stubs[0].pay_frequency || 'biweekly';
+      db.prepare(`
+        INSERT INTO income (id, case_id, source, employer_name, gross_monthly, net_monthly, pay_frequency)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        uuid(), caseId, 'Employment', employer,
+        Math.round((totalGross / months) * 100) / 100,
+        Math.round((totalNet   / months) * 100) / 100,
+        frequency
+      );
+    }
   }
 
   if (docType === 'bank_statement' || extracted.type === 'bank_statement') {
@@ -1076,6 +1287,180 @@ function registerIPC() {
     return { success: true };
   });
 
+  // ─── Means Test v1: provenance-graph IPC ────────────────────
+  ipcMain.handle('meansTest:listReceipts', (_, caseId) => {
+    const receipts = db.prepare(`
+      SELECT r.*, d.filename AS document_filename
+      FROM income_receipts r
+      LEFT JOIN documents d ON d.id = r.document_id
+      WHERE r.case_id = ?
+      ORDER BY r.pay_date DESC
+    `).all(caseId);
+    const ids = receipts.map(r => r.id);
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(() => '?').join(',');
+    const wh = db.prepare(`
+      SELECT * FROM tax_withholdings WHERE receipt_id IN (${placeholders})
+    `).all(...ids);
+    const byReceipt = new Map();
+    for (const w of wh) {
+      if (!byReceipt.has(w.receipt_id)) byReceipt.set(w.receipt_id, []);
+      byReceipt.get(w.receipt_id).push(w);
+    }
+    return receipts.map(r => ({ ...r, withholdings: byReceipt.get(r.id) || [] }));
+  });
+
+  ipcMain.handle('meansTest:upsertReceipt', (_, caseId, receipt) => {
+    const { v4: uuid } = require('uuid');
+    const id = receipt.id || uuid();
+    db.prepare(`
+      INSERT OR REPLACE INTO income_receipts (
+        id, case_id, document_id, source_page,
+        pay_date, pay_period_start, pay_period_end,
+        gross_amount, source_label, income_type,
+        manual_entry, entered_by, entered_at, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, caseId, receipt.document_id || null, receipt.source_page || null,
+      receipt.pay_date, receipt.pay_period_start || null, receipt.pay_period_end || null,
+      Number(receipt.gross_amount) || 0,
+      receipt.source_label || null,
+      receipt.income_type || 'wages',
+      receipt.manual_entry ? 1 : 0,
+      receipt.entered_by || 'attorney',
+      new Date().toISOString(),
+      receipt.notes || null
+    );
+    return { id };
+  });
+
+  ipcMain.handle('meansTest:deleteReceipt', (_, id) => {
+    db.prepare('DELETE FROM income_receipts WHERE id = ?').run(id);
+    return { success: true };
+  });
+
+  ipcMain.handle('meansTest:listManualDeductions', (_, caseId) => {
+    return db.prepare(`SELECT * FROM manual_deductions WHERE case_id = ? ORDER BY entered_at DESC`).all(caseId);
+  });
+
+  ipcMain.handle('meansTest:upsertManualDeduction', (_, caseId, ded) => {
+    const { v4: uuid } = require('uuid');
+    const id = ded.id || uuid();
+    db.prepare(`
+      INSERT OR REPLACE INTO manual_deductions (
+        id, case_id, b122a_line, category, description,
+        monthly_amount, supporting_doc_id, entered_by, entered_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, caseId, ded.b122a_line, ded.category,
+      ded.description || null,
+      Number(ded.monthly_amount) || 0,
+      ded.supporting_doc_id || null,
+      ded.entered_by || 'attorney',
+      new Date().toISOString()
+    );
+    return { id };
+  });
+
+  ipcMain.handle('meansTest:deleteManualDeduction', (_, id) => {
+    db.prepare('DELETE FROM manual_deductions WHERE id = ?').run(id);
+    return { success: true };
+  });
+
+  ipcMain.handle('meansTest:saveRun', (_, caseId, runData) => {
+    const { v4: uuid } = require('uuid');
+    const id = uuid();
+    db.prepare(`
+      INSERT INTO means_test_runs (
+        id, case_id, run_at, cmi, median_income, household_size,
+        state_code, county_fips, result, computed_json, unhandled_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, caseId, new Date().toISOString(),
+      runData.cmi ?? null, runData.median_income ?? null, runData.household_size ?? null,
+      runData.state_code || null, runData.county_fips || null,
+      runData.result || null,
+      JSON.stringify(runData.computed || {}),
+      JSON.stringify(runData.unhandled || [])
+    );
+    logCaseEvent(caseId, 'means_test_run',
+      `Means test computed: ${runData.result || 'pending'}`,
+      { run_id: id, cmi: runData.cmi, result: runData.result });
+    return { id };
+  });
+
+  ipcMain.handle('meansTest:listRuns', (_, caseId) => {
+    return db.prepare(`SELECT * FROM means_test_runs WHERE case_id = ? ORDER BY run_at DESC`).all(caseId);
+  });
+
+  ipcMain.handle('meansTest:exportAuditPacket', async (_, caseId, runId) => {
+    const { generateAuditPacket } = require('./main/exports/audit-packet.js');
+    const caseData = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId);
+    const debtor   = db.prepare('SELECT * FROM debtors WHERE case_id = ? AND is_joint = 0 LIMIT 1').get(caseId);
+    const run      = runId
+      ? db.prepare('SELECT * FROM means_test_runs WHERE id = ?').get(runId)
+      : db.prepare('SELECT * FROM means_test_runs WHERE case_id = ? ORDER BY run_at DESC LIMIT 1').get(caseId);
+    if (!run) throw new Error('No means test run found for this case. Run a means test first.');
+
+    const receipts = db.prepare(`
+      SELECT r.*, d.filename AS document_filename
+      FROM income_receipts r
+      LEFT JOIN documents d ON d.id = r.document_id
+      WHERE r.case_id = ?
+      ORDER BY r.pay_date ASC
+    `).all(caseId);
+    const manualDeductions = db.prepare(`SELECT * FROM manual_deductions WHERE case_id = ?`).all(caseId);
+
+    const buf = await generateAuditPacket({ caseId, caseData, debtor, run, receipts, manualDeductions });
+
+    const { dialog } = require('electron');
+    const { filePath, canceled } = await dialog.showSaveDialog({
+      title: 'Save Means Test Audit Packet',
+      defaultPath: `audit-packet-${(debtor?.last_name || 'case')}-${run.run_at.slice(0,10)}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return { canceled: true };
+    fs.writeFileSync(filePath, buf);
+    logCaseEvent(caseId, 'audit_packet_exported',
+      `Means test audit packet exported`,
+      { run_id: run.id, file_path: filePath });
+    return { filePath };
+  });
+
+  ipcMain.handle('meansTest:exportB122A', async (_, caseId, runId) => {
+    const { generateB122A } = require('./main/exports/b122a-export.js');
+    const caseData = db.prepare('SELECT * FROM cases WHERE id = ?').get(caseId);
+    const debtor   = db.prepare('SELECT * FROM debtors WHERE case_id = ? AND is_joint = 0 LIMIT 1').get(caseId);
+    const run      = runId
+      ? db.prepare('SELECT * FROM means_test_runs WHERE id = ?').get(runId)
+      : db.prepare('SELECT * FROM means_test_runs WHERE case_id = ? ORDER BY run_at DESC LIMIT 1').get(caseId);
+    if (!run) throw new Error('No means test run found for this case. Run a means test first.');
+
+    const receipts = db.prepare(`
+      SELECT r.*, d.filename AS document_filename
+      FROM income_receipts r
+      LEFT JOIN documents d ON d.id = r.document_id
+      WHERE r.case_id = ?
+      ORDER BY r.pay_date ASC
+    `).all(caseId);
+    const manualDeductions = db.prepare(`SELECT * FROM manual_deductions WHERE case_id = ?`).all(caseId);
+
+    const buf = await generateB122A({ caseData, debtor, run, receipts, manualDeductions });
+
+    const { dialog } = require('electron');
+    const { filePath, canceled } = await dialog.showSaveDialog({
+      title: 'Save Form B122A (working copy)',
+      defaultPath: `B122A-${(debtor?.last_name || 'case')}-${run.run_at.slice(0,10)}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return { canceled: true };
+    fs.writeFileSync(filePath, buf);
+    logCaseEvent(caseId, 'b122a_exported',
+      `Form B122A working copy exported`,
+      { run_id: run.id, file_path: filePath });
+    return { filePath };
+  });
+
   // Expenses
   ipcMain.handle('expenses:upsert', (_, caseId, exp) => {
     const { v4: uuid } = require('uuid');
@@ -1173,7 +1558,7 @@ function registerIPC() {
     // Auto-populate case financial data from extraction
     // Auto-populate: run both bankruptcy and PI population functions.
     // Each one checks the doc type and only acts on relevant documents.
-    populateCaseFromExtraction(doc.case_id, doc.doc_type, extracted);
+    populateCaseFromExtraction(doc.case_id, doc.doc_type, extracted, docId);
     populatePICaseFromExtraction(doc.case_id, doc.doc_type, extracted);
 
     logCaseEvent(doc.case_id, 'document_extracted',

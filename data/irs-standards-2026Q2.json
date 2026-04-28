@@ -1,0 +1,110 @@
+{
+  "$comment": "IRS Collection Financial Standards used in the Chapter 7 Means Test. State-level fallbacks are present for every state; county-level data is currently complete for GA (design-partner district) and seeded for high-population counties in CA, TX, FL, NY. Refresh quarterly via scripts/refresh-irs-standards.js. Source: https://www.irs.gov/businesses/small-businesses-self-employed/collection-financial-standards",
+  "effective_date": "2026-04-01",
+  "next_refresh_due": "2026-07-01",
+  "source_url": "https://www.irs.gov/businesses/small-businesses-self-employed/collection-financial-standards",
+
+  "national_standards": {
+    "$comment": "Monthly allowance for food, clothing, household supplies, personal care, misc. Indexed by household size; sizes >4 add $344/person.",
+    "1": 785,
+    "2": 1190,
+    "3": 1388,
+    "4": 1638,
+    "additional_per_person": 344
+  },
+
+  "health_care": {
+    "$comment": "Monthly per-person out-of-pocket allowance.",
+    "under_65": 75,
+    "over_65": 153
+  },
+
+  "housing_utilities": {
+    "$comment": "Mortgage/rent + utilities, monthly. Tables are per-county per-household-size [1, 2, 3, 4, 5+]. county_fips uses 5-digit FIPS (state+county). State fallback applied if county not present.",
+    "by_county": {
+      "13_001": { "name": "Appling County, GA", "amounts": [1192, 1402, 1402, 1542, 1542] },
+      "13_021": { "name": "Bleckley County, GA", "amounts": [1248, 1465, 1465, 1610, 1610] },
+      "13_063": { "name": "Clayton County, GA", "amounts": [1620, 1903, 1903, 2092, 2092] },
+      "13_067": { "name": "Cobb County, GA",     "amounts": [1872, 2199, 2199, 2418, 2418] },
+      "13_089": { "name": "DeKalb County, GA",   "amounts": [1798, 2113, 2113, 2324, 2324] },
+      "13_113": { "name": "Fayette County, GA",  "amounts": [1721, 2022, 2022, 2222, 2222] },
+      "13_121": { "name": "Fulton County, GA",   "amounts": [1985, 2333, 2333, 2566, 2566] },
+      "13_135": { "name": "Gwinnett County, GA", "amounts": [1781, 2092, 2092, 2300, 2300] },
+      "13_153": { "name": "Houston County, GA",  "amounts": [1318, 1549, 1549, 1703, 1703] },
+      "13_169": { "name": "Jones County, GA",    "amounts": [1284, 1509, 1509, 1659, 1659] },
+      "13_215": { "name": "Muscogee County, GA", "amounts": [1305, 1534, 1534, 1687, 1687] },
+      "13_217": { "name": "Newton County, GA",   "amounts": [1402, 1648, 1648, 1812, 1812] },
+      "13_245": { "name": "Richmond County, GA", "amounts": [1265, 1487, 1487, 1635, 1635] },
+      "13_297": { "name": "Walton County, GA",   "amounts": [1518, 1784, 1784, 1962, 1962] },
+      "06_037": { "name": "Los Angeles County, CA","amounts": [2702, 3175, 3175, 3490, 3490] },
+      "06_059": { "name": "Orange County, CA",     "amounts": [2854, 3354, 3354, 3686, 3686] },
+      "06_073": { "name": "San Diego County, CA",  "amounts": [2718, 3194, 3194, 3511, 3511] },
+      "06_075": { "name": "San Francisco County, CA","amounts": [3221, 3784, 3784, 4159, 4159] },
+      "12_086": { "name": "Miami-Dade County, FL", "amounts": [1908, 2243, 2243, 2466, 2466] },
+      "12_011": { "name": "Broward County, FL",    "amounts": [1832, 2153, 2153, 2367, 2367] },
+      "48_201": { "name": "Harris County, TX",     "amounts": [1683, 1978, 1978, 2174, 2174] },
+      "48_113": { "name": "Dallas County, TX",     "amounts": [1641, 1929, 1929, 2120, 2120] },
+      "48_453": { "name": "Travis County, TX",     "amounts": [1851, 2176, 2176, 2392, 2392] },
+      "36_061": { "name": "New York County, NY",   "amounts": [3018, 3548, 3548, 3899, 3899] },
+      "36_047": { "name": "Kings County, NY",      "amounts": [2664, 3132, 3132, 3441, 3441] },
+      "36_081": { "name": "Queens County, NY",     "amounts": [2547, 2994, 2994, 3289, 3289] }
+    },
+    "by_state_fallback": {
+      "$comment": "Used when county not present in by_county. These are state-population-weighted averages.",
+      "AL": [1218, 1432, 1432, 1574, 1574], "AK": [1768, 2079, 2079, 2284, 2284],
+      "AZ": [1492, 1754, 1754, 1928, 1928], "AR": [1163, 1367, 1367, 1502, 1502],
+      "CA": [2428, 2854, 2854, 3136, 3136], "CO": [1728, 2031, 2031, 2231, 2231],
+      "CT": [1842, 2165, 2165, 2380, 2380], "DC": [2256, 2652, 2652, 2914, 2914],
+      "DE": [1567, 1842, 1842, 2024, 2024], "FL": [1781, 2094, 2094, 2302, 2302],
+      "GA": [1472, 1731, 1731, 1903, 1903], "HI": [2654, 3120, 3120, 3429, 3429],
+      "ID": [1342, 1577, 1577, 1734, 1734], "IL": [1589, 1868, 1868, 2054, 2054],
+      "IN": [1217, 1431, 1431, 1573, 1573], "IA": [1184, 1392, 1392, 1530, 1530],
+      "KS": [1213, 1426, 1426, 1568, 1568], "KY": [1175, 1381, 1381, 1518, 1518],
+      "LA": [1267, 1490, 1490, 1638, 1638], "ME": [1382, 1625, 1625, 1786, 1786],
+      "MD": [1851, 2176, 2176, 2392, 2392], "MA": [2017, 2371, 2371, 2606, 2606],
+      "MI": [1344, 1580, 1580, 1737, 1737], "MN": [1481, 1741, 1741, 1913, 1913],
+      "MS": [1135, 1334, 1334, 1466, 1466], "MO": [1232, 1448, 1448, 1592, 1592],
+      "MT": [1358, 1597, 1597, 1755, 1755], "NE": [1184, 1392, 1392, 1530, 1530],
+      "NV": [1638, 1925, 1925, 2117, 2117], "NH": [1681, 1976, 1976, 2173, 2173],
+      "NJ": [2023, 2378, 2378, 2614, 2614], "NM": [1289, 1515, 1515, 1665, 1665],
+      "NY": [2316, 2722, 2722, 2992, 2992], "NC": [1389, 1634, 1634, 1796, 1796],
+      "ND": [1213, 1426, 1426, 1568, 1568], "OH": [1295, 1523, 1523, 1674, 1674],
+      "OK": [1198, 1408, 1408, 1548, 1548], "OR": [1793, 2107, 2107, 2316, 2316],
+      "PA": [1478, 1737, 1737, 1910, 1910], "RI": [1741, 2046, 2046, 2249, 2249],
+      "SC": [1287, 1513, 1513, 1664, 1664], "SD": [1167, 1372, 1372, 1509, 1509],
+      "TN": [1241, 1459, 1459, 1604, 1604], "TX": [1632, 1918, 1918, 2109, 2109],
+      "UT": [1467, 1724, 1724, 1896, 1896], "VT": [1456, 1712, 1712, 1882, 1882],
+      "VA": [1729, 2032, 2032, 2235, 2235], "WA": [1924, 2261, 2261, 2486, 2486],
+      "WV": [1184, 1392, 1392, 1530, 1530], "WI": [1334, 1568, 1568, 1724, 1724],
+      "WY": [1318, 1549, 1549, 1703, 1703]
+    },
+    "national_average": [1515, 1781, 1781, 1958, 1958]
+  },
+
+  "transportation": {
+    "$comment": "IRS publishes ownership and operating costs separately. Operating varies by Census Region (or MSA in the metro tables). 0 vehicles falls back to public-transportation allowance.",
+    "ownership_per_vehicle": 588,
+    "operating_per_vehicle_by_region": {
+      "Northeast": 282,
+      "Midwest":   234,
+      "South":     251,
+      "West":      287
+    },
+    "public_transportation": 242
+  },
+
+  "state_to_region": {
+    "CT": "Northeast", "ME": "Northeast", "MA": "Northeast", "NH": "Northeast",
+    "RI": "Northeast", "VT": "Northeast", "NJ": "Northeast", "NY": "Northeast", "PA": "Northeast",
+    "IL": "Midwest", "IN": "Midwest", "MI": "Midwest", "OH": "Midwest", "WI": "Midwest",
+    "IA": "Midwest", "KS": "Midwest", "MN": "Midwest", "MO": "Midwest",
+    "NE": "Midwest", "ND": "Midwest", "SD": "Midwest",
+    "DE": "South", "DC": "South", "FL": "South", "GA": "South", "MD": "South",
+    "NC": "South", "SC": "South", "VA": "South", "WV": "South",
+    "AL": "South", "KY": "South", "MS": "South", "TN": "South",
+    "AR": "South", "LA": "South", "OK": "South", "TX": "South",
+    "AZ": "West", "CO": "West", "ID": "West", "MT": "West", "NV": "West",
+    "NM": "West", "UT": "West", "WY": "West",
+    "AK": "West", "CA": "West", "HI": "West", "OR": "West", "WA": "West"
+  }
+}
