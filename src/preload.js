@@ -69,6 +69,17 @@ contextBridge.exposeInMainWorld('tabula', {
     uploadFiles: () => ipcRenderer.invoke('means-test:upload-files'),
     extract: (filePath, docCategory) => ipcRenderer.invoke('means-test:extract', filePath, docCategory),
     checkApiKey: () => ipcRenderer.invoke('means-test:check-api-key'),
+    // v1: provenance graph
+    listReceipts: (caseId) => ipcRenderer.invoke('meansTest:listReceipts', caseId),
+    upsertReceipt: (caseId, receipt) => ipcRenderer.invoke('meansTest:upsertReceipt', caseId, receipt),
+    deleteReceipt: (id) => ipcRenderer.invoke('meansTest:deleteReceipt', id),
+    listManualDeductions: (caseId) => ipcRenderer.invoke('meansTest:listManualDeductions', caseId),
+    upsertManualDeduction: (caseId, ded) => ipcRenderer.invoke('meansTest:upsertManualDeduction', caseId, ded),
+    deleteManualDeduction: (id) => ipcRenderer.invoke('meansTest:deleteManualDeduction', id),
+    saveRun: (caseId, runData) => ipcRenderer.invoke('meansTest:saveRun', caseId, runData),
+    listRuns: (caseId) => ipcRenderer.invoke('meansTest:listRuns', caseId),
+    exportAuditPacket: (caseId, runId) => ipcRenderer.invoke('meansTest:exportAuditPacket', caseId, runId),
+    exportB122A: (caseId, runId) => ipcRenderer.invoke('meansTest:exportB122A', caseId, runId),
   },
 
   // Notes
@@ -120,6 +131,20 @@ contextBridge.exposeInMainWorld('tabula', {
       upsert: (caseId, data) => ipcRenderer.invoke('pi:statutes:upsert', caseId, data),
       delete: (id) => ipcRenderer.invoke('pi:statutes:delete', id),
     },
+  },
+
+  // Plaid (sandbox-ready scaffold; phase 1 = link + token + sync)
+  plaid: {
+    isConfigured:      ()                                  => ipcRenderer.invoke('plaid:isConfigured'),
+    createLinkToken:   (caseId)                            => ipcRenderer.invoke('plaid:createLinkToken', caseId),
+    exchangeToken:     (caseId, publicToken, metadata)     => ipcRenderer.invoke('plaid:exchangeToken', caseId, publicToken, metadata),
+    listForCase:       (caseId)                            => ipcRenderer.invoke('plaid:listForCase', caseId),
+    syncTransactions:  (itemRowId)                         => ipcRenderer.invoke('plaid:syncTransactions', itemRowId),
+    disconnectItem:    (itemRowId)                         => ipcRenderer.invoke('plaid:disconnectItem', itemRowId),
+    detectIncome:      (caseId, windowStart, windowEnd)    => ipcRenderer.invoke('plaid:detectIncome', caseId, windowStart, windowEnd),
+    classifyExpenses:  (caseId, windowStart, windowEnd)    => ipcRenderer.invoke('plaid:classifyExpenses', caseId, windowStart, windowEnd),
+    acceptIncomeDrafts:  (caseId, drafts)                  => ipcRenderer.invoke('plaid:acceptIncomeDrafts', caseId, drafts),
+    acceptExpenseDrafts: (caseId, drafts)                  => ipcRenderer.invoke('plaid:acceptExpenseDrafts', caseId, drafts),
   },
 
   // Navigation listener (from menu bar)
