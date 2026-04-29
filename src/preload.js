@@ -143,6 +143,8 @@ contextBridge.exposeInMainWorld('tabula', {
     disconnectItem:    (itemRowId)                         => ipcRenderer.invoke('plaid:disconnectItem', itemRowId),
     detectIncome:      (caseId, windowStart, windowEnd)    => ipcRenderer.invoke('plaid:detectIncome', caseId, windowStart, windowEnd),
     classifyExpenses:  (caseId, windowStart, windowEnd)    => ipcRenderer.invoke('plaid:classifyExpenses', caseId, windowStart, windowEnd),
+    acceptIncomeDrafts:  (caseId, drafts)                  => ipcRenderer.invoke('plaid:acceptIncomeDrafts', caseId, drafts),
+    acceptExpenseDrafts: (caseId, drafts)                  => ipcRenderer.invoke('plaid:acceptExpenseDrafts', caseId, drafts),
   },
 
   // Navigation listener (from menu bar)

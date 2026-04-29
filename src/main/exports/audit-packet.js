@@ -55,13 +55,23 @@ async function generateAuditPacket({
   drawText(ctx, `Receipts in window: ${computed.cmiWindow?.receiptCount || receipts.length}`);
   drawText(ctx, `Sum of gross_amount: ${fmtMoney(sumReceipts(receipts) * 1)} ÷ 6 = CMI of ${fmtMoney(computed.cmi)}/mo`);
   ctx.y -= 4;
-  drawTableHeader(ctx, ['Pay date', 'Source', 'PDF page', 'Gross']);
+  drawTableHeader(ctx, ['Pay date', 'Source', 'Provenance', 'Gross']);
   for (const r of receipts) {
     ensureRoom(ctx, 16);
+    let provenance;
+    if (r.plaid_transaction_id) {
+      provenance = `Plaid txn ${truncate(r.plaid_transaction_id, 14)}`;
+    } else if (r.document_filename) {
+      provenance = `${truncate(r.document_filename, 18)} p${r.source_page ?? '?'}`;
+    } else if (r.manual_entry) {
+      provenance = 'manual entry';
+    } else {
+      provenance = '—';
+    }
     drawTableRow(ctx, [
       r.pay_date || '—',
-      truncate(r.source_label || r.document_filename || '—', 30),
-      r.source_page != null ? String(r.source_page) : '—',
+      truncate(r.source_label || r.document_filename || '—', 28),
+      provenance,
       fmtMoney(r.gross_amount),
     ]);
   }
@@ -115,19 +125,25 @@ async function generateAuditPacket({
   ctx.y -= 6;
   drawHR(ctx);
 
-  // ─── Section 4: Manual deductions ──────────────────────────
-  drawSection(ctx, '4. Manual Deductions');
+  // ─── Section 4: Manual / Plaid-classified deductions ───────
+  drawSection(ctx, '4. Manual & Plaid-Classified Deductions');
   if (manualDeductions.length === 0) {
     drawText(ctx, '— None entered.');
   } else {
-    drawTableHeader(ctx, ['Line', 'Category', 'Amount', 'Entered']);
+    drawTableHeader(ctx, ['Line', 'Category', 'Amount', 'Source']);
     for (const d of manualDeductions) {
       ensureRoom(ctx, 16);
+      let sourceLabel;
+      if (d.entered_by === 'plaid' && d.source_count) {
+        sourceLabel = `Plaid: ${d.source_count} txn${d.source_count === 1 ? '' : 's'}`;
+      } else {
+        sourceLabel = `${d.entered_by || '?'} @ ${(d.entered_at || '').slice(0, 10)}`;
+      }
       drawTableRow(ctx, [
         d.b122a_line,
-        truncate(d.category || '', 24),
+        truncate(d.category || '', 22),
         fmtMoney(d.monthly_amount),
-        truncate(`${d.entered_by || '?'} @ ${(d.entered_at || '').slice(0, 10)}`, 22),
+        truncate(sourceLabel, 22),
       ]);
       if (d.description) {
         ensureRoom(ctx, 14);

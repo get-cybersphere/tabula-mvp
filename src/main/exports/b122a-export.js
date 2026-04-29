@@ -64,13 +64,23 @@ async function generateB122A({
 
   ctx.y -= 4;
   drawText(ctx, 'Receipt-by-receipt breakdown (used to compute Line 11):', { italic: true });
-  drawTableHeader(ctx, ['Pay date', 'Source', 'PDF page', 'Gross']);
+  drawTableHeader(ctx, ['Pay date', 'Source', 'Provenance', 'Gross']);
   for (const r of receipts) {
     ensureRoom(ctx, 14);
+    let provenance;
+    if (r.plaid_transaction_id) {
+      provenance = `Plaid ${truncate(r.plaid_transaction_id, 12)}`;
+    } else if (r.document_filename) {
+      provenance = `${truncate(r.document_filename, 16)} p${r.source_page ?? '?'}`;
+    } else if (r.manual_entry) {
+      provenance = 'manual entry';
+    } else {
+      provenance = '—';
+    }
     drawTableRow(ctx, [
       r.pay_date || '—',
-      truncate(r.source_label || r.document_filename || '—', 30),
-      r.source_page != null ? String(r.source_page) : '—',
+      truncate(r.source_label || r.document_filename || '—', 28),
+      provenance,
       fmtMoney(r.gross_amount),
     ]);
   }
@@ -114,17 +124,20 @@ async function generateB122A({
     drawCitedField(ctx, '13. Vehicle operating',
       cite['B122A-2 Line 13']?.amount || 0, cite['B122A-2 Line 13']);
 
-    // Manually-entered B122A-2 lines, in line-number order.
+    // Manually-entered + Plaid-classified B122A-2 lines, in line-number order.
     if (manualDeductions.length > 0) {
       ctx.y -= 4;
-      drawText(ctx, 'Manually-entered deduction lines:', { italic: true });
+      drawText(ctx, 'Manually-entered & Plaid-classified deduction lines:', { italic: true });
       const sorted = [...manualDeductions].sort((a, b) =>
         String(a.b122a_line || '').localeCompare(String(b.b122a_line || ''), 'en', { numeric: true }));
       for (const md of sorted) {
         ensureRoom(ctx, 14);
         drawField(ctx, `${md.b122a_line}  ${md.category || ''}`,
           fmtMoney(md.monthly_amount));
-        drawText(ctx, `   ${md.description || ''} — entered ${(md.entered_at || '').slice(0, 10)} by ${md.entered_by || 'attorney'}`,
+        const sourceDetail = md.entered_by === 'plaid' && md.source_count
+          ? `${md.source_count} Plaid transaction${md.source_count === 1 ? '' : 's'} (accepted ${(md.entered_at || '').slice(0, 10)})`
+          : `entered ${(md.entered_at || '').slice(0, 10)} by ${md.entered_by || 'attorney'}`;
+        drawText(ctx, `   ${md.description || ''}${md.description ? ' — ' : ''}${sourceDetail}`,
           { color: rgb(0.45, 0.45, 0.45) });
       }
     }

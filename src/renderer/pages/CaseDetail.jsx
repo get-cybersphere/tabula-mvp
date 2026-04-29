@@ -7,6 +7,7 @@ import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
 import PlaidConnectCard from '../components/Plaid/PlaidConnectCard.jsx';
+import PlaidReviewCard from '../components/Plaid/PlaidReviewCard.jsx';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -1042,7 +1043,32 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   const [householdSize, setHouseholdSize] = useState(hasJoint ? 2 : 1);
   const [showResult, setShowResult] = useState(false);
 
-  // Build income sources in the format runMeansTest expects
+  // ─── Provenance graph (PR 6) + Plaid drafts (PR 8) ────────────
+  // Receipts come from paystub extraction OR accepted Plaid drafts
+  // (income_receipts.plaid_transaction_id non-null). Manual deductions
+  // come from manual entry OR accepted Plaid drafts (entered_by='plaid').
+  // When receipts exist, runMeansTest uses them and ignores the legacy
+  // aggregated `income` rows; otherwise it falls back via the shim in
+  // means-test.js. Same for manualDeductions.
+  const [receipts, setReceipts] = useState([]);
+  const [manualDeductions, setManualDeductions] = useState([]);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [rec, md] = await Promise.all([
+        window.tabula.meansTest.listReceipts(caseId),
+        window.tabula.meansTest.listManualDeductions(caseId),
+      ]);
+      if (cancelled) return;
+      setReceipts(rec || []);
+      setManualDeductions(md || []);
+    })();
+    return () => { cancelled = true; };
+  }, [caseId, reloadKey]);
+
+  // Build legacy income sources for fallback compatibility
   const incomeSources = income.map(i => ({
     employer: i.employer_name || i.source,
     grossAmount: i.gross_monthly || 0,
@@ -1059,7 +1085,9 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   }
 
   const meansResult = showResult ? runMeansTest({
-    incomeSources,
+    receipts,            // preferred when non-empty (receipts from paystubs OR Plaid)
+    manualDeductions,    // preferred when non-empty (manual OR Plaid-classified)
+    incomeSources,       // legacy fallback
     stateCode,
     householdSize,
     extractedExpenses: expenseMap,
@@ -1113,6 +1141,11 @@ function MeansTestTab({ caseData, caseId, onRefresh }) {
   return (
     <div>
       <PlaidConnectCard caseId={caseId} />
+      <PlaidReviewCard
+        caseId={caseId}
+        filingDate={caseData.filed_at}
+        onAccepted={() => { setShowResult(false); setReloadKey(k => k + 1); onRefresh?.(); }}
+      />
       {/* Means Test Parameters & Run */}
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-header">

@@ -2161,6 +2161,89 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
     const { classifyExpenses } = require('./main/plaid/expense-classifier');
     return classifyExpenses({ db, caseId, windowStart, windowEnd });
   });
+
+  // Accept selected income drafts → write to income_receipts.
+  // Each accepted draft becomes one receipt row with plaid_transaction_id
+  // set so the provenance graph + audit packet can cite the bank transaction.
+  ipcMain.handle('plaid:acceptIncomeDrafts', (_, caseId, drafts) => {
+    const { v4: uuid } = require('uuid');
+    const insert = db.prepare(`
+      INSERT INTO income_receipts (
+        id, case_id, document_id, source_page,
+        pay_date, pay_period_start, pay_period_end,
+        gross_amount, source_label, income_type,
+        manual_entry, entered_by, entered_at, notes,
+        plaid_transaction_id
+      ) VALUES (?, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?, 0, 'plaid', ?, ?, ?)
+    `);
+    const txn = db.transaction(() => {
+      let count = 0;
+      for (const d of drafts || []) {
+        if (!d.pay_date || !d.gross_amount) continue;
+        // Skip if this plaid transaction was already accepted for this case
+        if (d.plaid_transaction_id) {
+          const existing = db.prepare(
+            'SELECT 1 FROM income_receipts WHERE case_id = ? AND plaid_transaction_id = ?'
+          ).get(caseId, d.plaid_transaction_id);
+          if (existing) continue;
+        }
+        insert.run(
+          uuid(), caseId,
+          d.pay_date, Number(d.gross_amount) || 0,
+          d.source_label || 'Plaid deposit', d.income_type || 'wages',
+          new Date().toISOString(), d.notes || `Accepted from Plaid (${d.cadence || 'unknown'} cadence, ${d.confidence || 'medium'} confidence)`,
+          d.plaid_transaction_id || null
+        );
+        count++;
+      }
+      return count;
+    });
+    const accepted = txn();
+    if (accepted > 0) {
+      logCaseEvent(caseId, 'plaid_income_accepted',
+        `${accepted} income receipt${accepted === 1 ? '' : 's'} accepted from Plaid`,
+        { count: accepted });
+    }
+    return { accepted };
+  });
+
+  // Accept selected expense drafts → write to manual_deductions.
+  // The list of source plaid_transaction_ids is stored as JSON so the
+  // audit packet can show which transactions contributed to each line.
+  ipcMain.handle('plaid:acceptExpenseDrafts', (_, caseId, drafts) => {
+    const { v4: uuid } = require('uuid');
+    const insert = db.prepare(`
+      INSERT INTO manual_deductions (
+        id, case_id, b122a_line, category, description,
+        monthly_amount, supporting_doc_id, entered_by, entered_at,
+        source_plaid_transactions, source_count
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, 'plaid', ?, ?, ?)
+    `);
+    const txn = db.transaction(() => {
+      let count = 0;
+      for (const d of drafts || []) {
+        if (!d.b122a_line || d.monthly_amount == null) continue;
+        insert.run(
+          uuid(), caseId,
+          d.b122a_line, d.category || 'plaid_classified',
+          d.description || d.label || null,
+          Number(d.monthly_amount) || 0,
+          new Date().toISOString(),
+          JSON.stringify(d.source_transactions || []),
+          d.source_count || (d.source_transactions || []).length
+        );
+        count++;
+      }
+      return count;
+    });
+    const accepted = txn();
+    if (accepted > 0) {
+      logCaseEvent(caseId, 'plaid_expenses_accepted',
+        `${accepted} expense deduction${accepted === 1 ? '' : 's'} accepted from Plaid`,
+        { count: accepted });
+    }
+    return { accepted };
+  });
 }
 
 function guessDocType(filename) {

@@ -3,14 +3,15 @@
 // Every computed value in the means test must trace back to either:
 //   • a document page (extracted receipt or withholding line),
 //   • an IRS Local Standards table version + scope (county/state/national),
-//   • or a manual entry (timestamped, by-user).
+//   • a manual entry (timestamped, by-user), or
+//   • a Plaid bank transaction (when accepted from a Plaid draft).
 //
 // The Citation type is the unit of provenance. The runMeansTest output
 // embeds Citation references; this module is the canonical formatter.
 
 /**
  * @typedef {Object} Citation
- * @property {'document_page'|'irs_standard'|'manual_entry'|'computed'} kind
+ * @property {'document_page'|'irs_standard'|'manual_entry'|'plaid_transaction'|'computed'} kind
  * @property {string} [refId]              record id this points to
  * @property {string} [label]              human-readable string
  * @property {object} [meta]               kind-specific metadata
@@ -54,6 +55,27 @@ export function manualCitation({ b122a_line, category, description, monthly_amou
     kind: 'manual_entry',
     label: `${b122a_line}${category ? ` (${category})` : ''}: $${(monthly_amount||0).toLocaleString()}/mo, entered by ${entered_by || 'attorney'} at ${entered_at || ''}${description ? ` — ${description}` : ''}`,
     meta: { b122a_line, category, description, monthly_amount, entered_by, entered_at, supporting_doc_id },
+  };
+}
+
+/**
+ * Build a Citation for a Plaid bank transaction. Used when an income
+ * receipt or manual deduction was accepted from a Plaid draft. The
+ * audit packet renders these alongside document_page and irs_standard
+ * citations so the trustee sees the full provenance.
+ */
+export function plaidTransactionCitation({ plaid_transaction_id, date, merchant_name, name, amount, institution_name, account_mask }) {
+  const merchant = merchant_name || name || 'Bank transaction';
+  const institution = institution_name ? ` via ${institution_name}` : '';
+  const acct = account_mask ? ` ••${account_mask}` : '';
+  const amt = amount != null
+    ? ` ($${Math.abs(Number(amount) || 0).toLocaleString()})`
+    : '';
+  return {
+    kind: 'plaid_transaction',
+    refId: plaid_transaction_id,
+    label: `${merchant}${institution}${acct} on ${date || 'unknown date'}${amt}`,
+    meta: { plaid_transaction_id, date, merchant_name: merchant, amount, institution_name, account_mask },
   };
 }
 
