@@ -7,6 +7,7 @@ import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
 import FilingTab from '../components/case/FilingTab.jsx';
+import InsightsTab from '../components/case/InsightsTab.jsx';
 import DropOverlay from '../components/DropOverlay.jsx';
 import { Toaster, useToaster } from '../components/Toaster.jsx';
 
@@ -24,6 +25,7 @@ const BANKRUPTCY_TABS = [
   { key: 'assets', label: 'Assets' },
   { key: 'creditors', label: 'Creditors' },
   { key: 'means-test', label: 'Means Test' },
+  { key: 'insights', label: 'Insights' },
   { key: 'filing', label: 'Filing' },
   { key: 'review', label: 'Review' },
 ];
@@ -283,6 +285,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
             {!isPI && activeTab === 'assets' && <AssetsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
             {!isPI && activeTab === 'creditors' && <CreditorsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
             {!isPI && activeTab === 'means-test' && <MeansTestTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
+            {!isPI && activeTab === 'insights' && <InsightsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
             {!isPI && activeTab === 'filing' && <FilingTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
 
             {/* PI-only tabs */}

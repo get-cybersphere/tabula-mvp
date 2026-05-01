@@ -294,6 +294,9 @@ function initDatabase() {
   // module so its schema lives next to the code that uses it.
   require('./main/petition').installSchema(db);
 
+  // Bank statement intelligence findings. Same pattern.
+  require('./main/bank-intel').installSchema(db);
+
   seedDemoData();
 }
 
@@ -418,6 +421,75 @@ function seedDemoData() {
         { doc_type: 'bank_statement' }, daysAgo(27));
       logCaseEvent(c.id, 'document_extracted', 'Extracted chase_statement_mar.pdf',
         { mock: false, redaction_count: 6 }, daysAgo(27));
+
+      // Seed a synthetic bank-statement extraction with realistic
+      // transactions so the Insights tab demos meaningfully on first run.
+      // Mix of categories: insider, preference, discretionary, undisclosed.
+      const dateBefore = (n) => new Date(today.getTime() - n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const seededTxns = [
+        // Mortgage (business — should NOT flag as insider; but $1450 to "Wells Fargo" matching creditor IS preference if recent)
+        { date: dateBefore(30),  merchant: 'WELLS FARGO HOME MORTGAGE',     amount: -1450.00, type: 'debit' },
+        { date: dateBefore(60),  merchant: 'WELLS FARGO HOME MORTGAGE',     amount: -1450.00, type: 'debit' },
+        // Insider risk: recurring transfer to individual
+        { date: dateBefore(15),  merchant: 'ZELLE TO TERESA THOMPSON',      amount: -2400.00, type: 'debit' },
+        { date: dateBefore(45),  merchant: 'ZELLE TO TERESA THOMPSON',      amount: -2400.00, type: 'debit' },
+        { date: dateBefore(75),  merchant: 'ZELLE TO TERESA THOMPSON',      amount: -2400.00, type: 'debit' },
+        // Single large transfer to individual
+        { date: dateBefore(40),  merchant: 'JAMES O\'BRIEN',                amount: -3500.00, type: 'debit' },
+        // Discretionary: private school
+        { date: dateBefore(8),   merchant: 'BROOKLYN MONTESSORI ACADEMY',   amount: -1100.00, type: 'debit' },
+        { date: dateBefore(38),  merchant: 'BROOKLYN MONTESSORI ACADEMY',   amount: -1100.00, type: 'debit' },
+        { date: dateBefore(68),  merchant: 'BROOKLYN MONTESSORI ACADEMY',   amount: -1100.00, type: 'debit' },
+        // Discretionary: travel sports
+        { date: dateBefore(20),  merchant: 'NEW YORK ELITE SOCCER CLUB',    amount: -420.00,  type: 'debit' },
+        // Discretionary: hotel + airline
+        { date: dateBefore(22),  merchant: 'MARRIOTT BOSTON',               amount: -487.50,  type: 'debit' },
+        { date: dateBefore(22),  merchant: 'DELTA AIR LINES',               amount: -340.00,  type: 'debit' },
+        // Subscription pile
+        { date: dateBefore(11),  merchant: 'NETFLIX',                       amount: -19.99,   type: 'debit' },
+        { date: dateBefore(41),  merchant: 'NETFLIX',                       amount: -19.99,   type: 'debit' },
+        { date: dateBefore(11),  merchant: 'SPOTIFY USA',                   amount: -10.99,   type: 'debit' },
+        { date: dateBefore(41),  merchant: 'SPOTIFY USA',                   amount: -10.99,   type: 'debit' },
+        { date: dateBefore(13),  merchant: 'EQUINOX FITNESS',               amount: -245.00,  type: 'debit' },
+        { date: dateBefore(43),  merchant: 'EQUINOX FITNESS',               amount: -245.00,  type: 'debit' },
+        // Preference-period transfer to creditor
+        { date: dateBefore(45),  merchant: 'CAPITAL ONE PMT',               amount: -1200.00, type: 'debit' },
+        // Undisclosed income from a payer not on Schedule I
+        { date: dateBefore(20),  merchant: 'SIDESTREAM CONSULTING LLC',     amount: 1800.00,  type: 'credit' },
+        { date: dateBefore(50),  merchant: 'SIDESTREAM CONSULTING LLC',     amount: 1800.00,  type: 'credit' },
+        { date: dateBefore(80),  merchant: 'SIDESTREAM CONSULTING LLC',     amount: 1800.00,  type: 'credit' },
+        // Declared employer paystubs
+        { date: dateBefore(2),   merchant: 'ACME INDUSTRIES PAYROLL',       amount: 1519.25,  type: 'credit' },
+        { date: dateBefore(16),  merchant: 'ACME INDUSTRIES PAYROLL',       amount: 1519.25,  type: 'credit' },
+        { date: dateBefore(30),  merchant: 'ACME INDUSTRIES PAYROLL',       amount: 1519.25,  type: 'credit' },
+        // Gambling activity
+        { date: dateBefore(60),  merchant: 'DRAFTKINGS DEPOSIT',            amount: -200.00,  type: 'debit' },
+        { date: dateBefore(64),  merchant: 'FANDUEL DEPOSIT',               amount: -150.00,  type: 'debit' },
+      ];
+      const docId = uuid();
+      const docPath = path.join(app.getPath('userData'), 'documents', c.id, `${docId}_chase_statement_full_year.pdf`);
+      // We don't write a real PDF — the seed just fills the metadata so the
+      // analyzer has transactions to chew on.
+      const seededExtraction = {
+        type: 'bank_statement',
+        bank: 'Chase',
+        accountType: 'Checking',
+        accountLast4: '4821',
+        statementPeriod: '12 months',
+        transactions: seededTxns,
+      };
+      db.prepare('INSERT INTO documents (id, case_id, filename, file_path, doc_type, extracted_data, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        docId, c.id, 'chase_statement_full_year.pdf', docPath, 'bank_statement',
+        JSON.stringify(seededExtraction), daysAgo(27)
+      );
+
+      // Run the bank-intel analyzer once now so the demo case opens with
+      // populated findings on first launch.
+      try {
+        require('./main/bank-intel').analyzeCase(db, c.id);
+      } catch (err) {
+        console.error('[seed] bank-intel analyze failed:', err.message);
+      }
     }
   }
 }
@@ -488,7 +560,23 @@ Extract from this paystub:
     case 'bank_statement':
       return `${baseInstruction}
 
-Extract from this bank statement:
+Extract from this bank statement. Include the FULL transaction list — every
+posted line item — under the "transactions" array. The downstream bank-
+intelligence analyzer needs transaction-level data to flag insider
+payments, preference-period transfers, and discretionary spend.
+
+Each transaction:
+  - amount: NEGATIVE for outflows (debits, payments, withdrawals, transfers
+            out), POSITIVE for inflows (deposits, credits, transfers in)
+  - date: MM/DD/YYYY (use the posted date; if only one date is shown use it)
+  - merchant: payee name AS PRINTED on the statement (don't clean it up —
+              the analyzer needs the raw form to detect ZELLE TO X, ACH
+              prefixes, etc.)
+  - type: "debit" | "credit" | "transfer" | "fee" | "interest" | "atm"
+
+If the document is short (one-page summary only) and no transaction list
+is visible, return an empty transactions array — DON'T fabricate.
+
 {
   "type": "bank_statement",
   "bank": "bank name",
@@ -511,6 +599,9 @@ Extract from this bank statement:
   },
   "recurringPayments": [
     { "payee": "name", "amount": 0.00, "frequency": "monthly" }
+  ],
+  "transactions": [
+    { "date": "MM/DD/YYYY", "merchant": "RAW PAYEE NAME", "amount": -123.45, "type": "debit" }
   ]
 }`;
 
@@ -1529,6 +1620,15 @@ function registerIPC() {
         populateCaseFromExtraction(caseId, finalDocType, extracted);
         populatePICaseFromExtraction(caseId, finalDocType, extracted);
 
+        // Refresh bank intel when a statement lands.
+        if (finalDocType === 'bank_statement' && Array.isArray(extracted.transactions) && extracted.transactions.length) {
+          try {
+            require('./main/bank-intel').analyzeCase(db, caseId);
+          } catch (err) {
+            console.error('[bank-intel] analyze failed:', err.message);
+          }
+        }
+
         logCaseEvent(caseId, 'document_extracted',
           `Extracted ${filename}${extracted._mock ? ' (mock)' : ''}`,
           { document_id: id, mock: !!extracted._mock, redaction_count: extracted._redactionCount || 0 }
@@ -1613,6 +1713,16 @@ function registerIPC() {
     // Each one checks the doc type and only acts on relevant documents.
     populateCaseFromExtraction(doc.case_id, doc.doc_type, extracted);
     populatePICaseFromExtraction(doc.case_id, doc.doc_type, extracted);
+
+    // Auto-run bank intelligence whenever a bank statement lands so
+    // findings refresh without the attorney clicking re-analyze.
+    if ((doc.doc_type === 'bank_statement' || extracted.type === 'bank_statement') && Array.isArray(extracted.transactions) && extracted.transactions.length) {
+      try {
+        require('./main/bank-intel').analyzeCase(db, doc.case_id);
+      } catch (err) {
+        console.error('[bank-intel] analyze failed:', err.message);
+      }
+    }
 
     logCaseEvent(doc.case_id, 'document_extracted',
       `Extracted ${doc.filename}${extracted._mock ? ' (mock)' : ''}`,
@@ -2068,6 +2178,9 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
 
   // Petition / filing-packet generation handlers.
   require('./main/petition').registerIPC({ ipcMain, db, app, logCaseEvent });
+
+  // Bank intelligence handlers.
+  require('./main/bank-intel').registerIPC({ ipcMain, db, logCaseEvent });
 }
 
 function guessDocType(filename) {
