@@ -122,6 +122,19 @@ contextBridge.exposeInMainWorld('tabula', {
     },
   },
 
+  // Petition / filing packet
+  petition: {
+    listForms: (chapter) => ipcRenderer.invoke('petition:listForms', chapter),
+    preview: (caseId) => ipcRenderer.invoke('petition:preview', caseId),
+    generate: (caseId, opts) => ipcRenderer.invoke('petition:generate', caseId, opts),
+    listPackets: (caseId) => ipcRenderer.invoke('petition:listPackets', caseId),
+    getPacket: (packetId) => ipcRenderer.invoke('petition:getPacket', packetId),
+    revealPacket: (packetId) => ipcRenderer.invoke('petition:revealPacket', packetId),
+    openForm: (packetId, fileName) => ipcRenderer.invoke('petition:openForm', packetId, fileName),
+    setStatus: (packetId, status, notes) => ipcRenderer.invoke('petition:setStatus', packetId, status, notes),
+    deletePacket: (packetId) => ipcRenderer.invoke('petition:deletePacket', packetId),
+  },
+
   // Navigation listener (from menu bar)
   onNavigate: (callback) => {
     ipcRenderer.on('navigate', (_, path) => callback(path));

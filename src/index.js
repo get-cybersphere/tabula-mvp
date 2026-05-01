@@ -290,6 +290,10 @@ function initDatabase() {
     );
   `);
 
+  // Petition / filing-packet generation tables. Owned by the petition
+  // module so its schema lives next to the code that uses it.
+  require('./main/petition').installSchema(db);
+
   seedDemoData();
 }
 
@@ -1627,6 +1631,9 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
     db.prepare('DELETE FROM pi_statutes WHERE id = ?').run(id);
     return { success: true };
   });
+
+  // Petition / filing-packet generation handlers.
+  require('./main/petition').registerIPC({ ipcMain, db, app, logCaseEvent });
 }
 
 function guessDocType(filename) {
