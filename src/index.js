@@ -814,6 +814,108 @@ This is a pre-bankruptcy credit counseling certificate (required under 11 USC 10
   "notes": "anything about the format of the certificate"
 }`;
 
+    case 'deed':
+      return `${baseInstruction}
+
+This is a real-property deed (warranty deed, quitclaim deed, grant deed, trust deed).
+Extract grantor / grantee / property + recording info for Schedule A/B real-estate population.
+
+{
+  "type": "deed",
+  "deedType": "warranty|quitclaim|grant|special_warranty|trust|other",
+  "grantor": "person/entity transferring the property (seller)",
+  "grantee": "person/entity receiving the property (buyer / current owner)",
+  "executionDate": "MM/DD/YYYY",
+  "recordingDate": "MM/DD/YYYY",
+  "recordingCounty": "county where recorded",
+  "recordingState": "state",
+  "instrumentNumber": "doc/instrument/recording number",
+  "bookPage": "book/volume + page if shown",
+  "parcelId": "APN / parcel / property identification number",
+  "propertyAddress": "full street, city, state, zip",
+  "propertyCity": "city",
+  "propertyState": "state",
+  "propertyZip": "zip",
+  "propertyCounty": "county",
+  "propertyType": "single_family|duplex|condo|manufactured|land|investment|timeshare|other",
+  "legalDescription": "the legal description text (lot/block/subdivision)",
+  "consideration": 0.00,
+  "notes": "anything material — easements, covenants, deed restrictions"
+}`;
+
+    case 'lease':
+      return `${baseInstruction}
+
+This is a lease agreement (residential, commercial, equipment, vehicle).
+The data populates Schedule G (executory contracts) when the B106G mapper ships;
+for now it persists on the document for later use.
+
+{
+  "type": "lease",
+  "leaseCategory": "residential|commercial|equipment|vehicle|storage|other",
+  "lessor": "landlord / lessor name and address",
+  "lessee": "tenant / lessee name (the debtor or co-debtor)",
+  "leasedItem": "property address, equipment description, or vehicle year/make/model",
+  "leasedItemAddress": "full address if real property",
+  "executionDate": "MM/DD/YYYY",
+  "termStart": "MM/DD/YYYY",
+  "termEnd": "MM/DD/YYYY",
+  "monthlyRent": 0.00,
+  "securityDeposit": 0.00,
+  "isMonthToMonth": false,
+  "renewalOption": "describe any auto-renewal or option to extend",
+  "isInDefault": false,
+  "amountInDefault": 0.00,
+  "notes": "anything material — option to purchase, sublet rights, default notices"
+}`;
+
+    case 'car_title':
+      return `${baseInstruction}
+
+This is a vehicle certificate of title (or similar registration document).
+Populates Schedule A/B vehicle row.
+
+{
+  "type": "car_title",
+  "vehicleYear": "YYYY",
+  "vehicleMake": "make (Honda, Ford, etc.)",
+  "vehicleModel": "model",
+  "vin": "VIN — 17 chars typically",
+  "registeredOwner": "owner name as on title",
+  "coOwner": "second owner if joint title",
+  "lienHolder": "lien-holder name (lender) — empty if title is clean",
+  "lienHolderAddress": "lien-holder address",
+  "approximateMileage": 0,
+  "titleNumber": "title control number",
+  "titleState": "state of title",
+  "titleIssueDate": "MM/DD/YYYY",
+  "isLienReleased": false,
+  "isSalvage": false,
+  "notes": "anything material — branded title, repossession status, etc."
+}`;
+
+    case 'appraisal':
+      return `${baseInstruction}
+
+This is an appraisal report — real estate, jewelry, vehicle, business equipment, art.
+Populates / updates an asset's current value.
+
+{
+  "type": "appraisal",
+  "appraisedItemType": "real_estate|vehicle|jewelry|art|business_equipment|household|other",
+  "appraisedItemDescription": "what was appraised — full description",
+  "appraisedItemAddress": "address if real property",
+  "appraiserName": "appraiser name",
+  "appraiserCredentials": "license/cert number, designation",
+  "appraiserCompany": "appraisal company name",
+  "appraisalDate": "MM/DD/YYYY",
+  "effectiveDate": "MM/DD/YYYY (date the value applies to)",
+  "appraisedValue": 0.00,
+  "valuationMethod": "comparable_sales|cost_approach|income_approach|replacement_cost|other",
+  "purpose": "purpose of appraisal — bankruptcy, refinance, estate, insurance",
+  "notes": "anything material — condition notes, insured-value vs market-value distinction"
+}`;
+
     default:
       // Smart classifier-extractor: when we don't know the doc type by
       // filename, ask Claude to identify AND extract in one call. Cheaper
@@ -832,6 +934,10 @@ The "type" must be one of:
 - "mortgage_statement"               (monthly mortgage / escrow / HELOC)
 - "insurance_policy"                 (auto, home, life, health declaration)
 - "credit_counseling_certificate"    (pre-bankruptcy 109(h) certificate)
+- "deed"                             (warranty / quitclaim / grant deed)
+- "lease"                            (residential / commercial / equipment lease)
+- "car_title"                        (vehicle certificate of title)
+- "appraisal"                        (real-estate / jewelry / vehicle / business appraisal)
 - "police_report" | "medical_bill"   (PI documents)
 - "insurance_declaration"            (PI auto coverage declaration)
 - "other"                            (none of the above)
@@ -846,6 +952,10 @@ credit_report: { type, bureau, pullDate, creditScore, accounts: [{ creditor, acc
 mortgage_statement: { type, lenderName, loanNumber, propertyAddress, principalBalance, regularMonthlyPayment, principalAndInterest, escrowAmount, isCurrent, notes }
 insurance_policy: { type, coverageType, carrier, policyNumber, monthlyPremium, annualPremium, coverageDetails: { ... }, coveredItem, notes }
 credit_counseling_certificate: { type, agencyName, certificateNumber, debtorName, completionDate, courseType, approvedByEOUST, notes }
+deed: { type, deedType, grantor, grantee, recordingDate, recordingCounty, instrumentNumber, parcelId, propertyAddress, propertyCity, propertyState, propertyZip, propertyCounty, propertyType, consideration, notes }
+lease: { type, leaseCategory, lessor, lessee, leasedItem, leasedItemAddress, termStart, termEnd, monthlyRent, securityDeposit, isMonthToMonth, isInDefault, amountInDefault, notes }
+car_title: { type, vehicleYear, vehicleMake, vehicleModel, vin, registeredOwner, lienHolder, lienHolderAddress, approximateMileage, titleNumber, titleState, isLienReleased, notes }
+appraisal: { type, appraisedItemType, appraisedItemDescription, appraisedItemAddress, appraiserName, appraisalDate, appraisedValue, valuationMethod, notes }
 other: { type: "other", documentCategory, financialData, notes }
 
 Return ONLY valid JSON, no markdown fences.`;
@@ -935,6 +1045,16 @@ function summarizeExtraction(docType, e) {
     }
     case 'credit_counseling_certificate':
       return `Credit counseling certificate filed (109(h) prerequisite) — ${e.agencyName || 'agency'}`;
+    case 'deed':
+      return `Deed extracted — ${e.propertyAddress || 'property'}${e.consideration ? ', ' + fmt$(e.consideration) : ''}, recorded ${e.recordingDate || 'unknown'}`;
+    case 'lease': {
+      const m = Number(e.monthlyRent || 0);
+      return `Lease extracted — ${e.leaseCategory || 'lease'} from ${e.lessor || 'lessor'}${m > 0 ? `, ${fmt$(m)}/mo` : ''}`;
+    }
+    case 'car_title':
+      return `Vehicle title — ${[e.vehicleYear, e.vehicleMake, e.vehicleModel].filter(Boolean).join(' ') || 'vehicle'}${e.lienHolder ? `, lien: ${e.lienHolder}` : ''}`;
+    case 'appraisal':
+      return `Appraisal — ${e.appraisedItemDescription || e.appraisedItemType || 'item'} valued at ${fmt$(e.appraisedValue)}`;
     case 'police_report':
       return `Police report — ${e.accidentType || 'accident'} on ${e.accidentDate || 'date'}, ${e.atFaultParty || 'at-fault party'}`;
     case 'medical_bill':
@@ -1115,6 +1235,94 @@ function populateCaseFromExtraction(caseId, docType, extracted) {
         course_type: extracted.courseType || 'pre-filing',
       }
     );
+  }
+
+  // ─── Deed: Schedule A real-estate asset row ─────────────────
+  if (docType === 'deed' || extracted.type === 'deed') {
+    const description = [
+      extracted.propertyAddress || extracted.legalDescription || 'Real property',
+      extracted.parcelId ? `Parcel ${extracted.parcelId}` : null,
+      extracted.recordingDate ? `Recorded ${extracted.recordingDate}` : null,
+    ].filter(Boolean).join(' — ');
+    db.prepare('INSERT INTO assets (id, case_id, schedule, category, description, current_value, exemption_statute, exemption_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      uuid(), caseId, 'A', 'real_estate', description,
+      Number(extracted.consideration || 0), '', 0
+    );
+  }
+
+  // ─── Lease: no asset row (Schedule G); the document's
+  // extracted_data carries the full lease info for the
+  // future B106G mapper. We log a timeline event so the
+  // attorney sees the lease is on file. ─────────────────────
+  if (docType === 'lease' || extracted.type === 'lease') {
+    const item = extracted.leasedItemAddress || extracted.leasedItem || 'leased item';
+    logCaseEvent(caseId, 'lease_extracted',
+      `Lease extracted: ${extracted.lessor || 'lessor'} → ${item}, $${(extracted.monthlyRent || 0).toLocaleString()}/mo`,
+      {
+        lessor: extracted.lessor,
+        leased_item: item,
+        monthly_rent: extracted.monthlyRent,
+        category: extracted.leaseCategory,
+        in_default: !!extracted.isInDefault,
+      }
+    );
+    // Lease payments also become a Schedule J expense if not already present.
+    if (Number(extracted.monthlyRent || 0) > 0) {
+      db.prepare('INSERT INTO expenses (id, case_id, category, description, monthly_amount) VALUES (?, ?, ?, ?, ?)').run(
+        uuid(), caseId, 'Rent/Mortgage',
+        `Lease — ${extracted.lessor || 'lessor'} (${item})`,
+        Number(extracted.monthlyRent)
+      );
+    }
+  }
+
+  // ─── Car title: Schedule B vehicle asset row ────────────────
+  if (docType === 'car_title' || extracted.type === 'car_title') {
+    const description = [
+      extracted.vehicleYear, extracted.vehicleMake, extracted.vehicleModel,
+    ].filter(Boolean).join(' ') || 'Vehicle';
+    const detail = extracted.vin ? `${description} VIN ${String(extracted.vin).slice(-6)}` :
+      `${description}${extracted.approximateMileage ? `, ~${Number(extracted.approximateMileage).toLocaleString()} mi` : ''}`;
+    db.prepare('INSERT INTO assets (id, case_id, schedule, category, description, current_value, exemption_statute, exemption_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      uuid(), caseId, 'B', 'vehicle', detail, 0, '', 0
+    );
+    // If a lien-holder is named on the title, that's a secured creditor.
+    if (extracted.lienHolder && !extracted.isLienReleased) {
+      db.prepare('INSERT INTO creditors (id, case_id, name, address, debt_type, schedule, amount_claimed, collateral_description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+        uuid(), caseId, extracted.lienHolder, extracted.lienHolderAddress || '',
+        'auto_loan', 'D', 0, description
+      );
+    }
+  }
+
+  // ─── Appraisal: update an existing asset's value if we can
+  // match on description, otherwise add a new asset row. ──────
+  if (docType === 'appraisal' || extracted.type === 'appraisal') {
+    const value = Number(extracted.appraisedValue || 0);
+    if (value > 0) {
+      const desc = (extracted.appraisedItemDescription || '').toLowerCase();
+      const addr = (extracted.appraisedItemAddress || '').toLowerCase();
+      // Try to find an existing asset whose description overlaps.
+      const candidates = db.prepare('SELECT id, description FROM assets WHERE case_id = ?').all(caseId);
+      const match = candidates.find(a => {
+        const adesc = (a.description || '').toLowerCase();
+        if (!adesc) return false;
+        if (desc && adesc.includes(desc.slice(0, 20))) return true;
+        if (addr && adesc.includes(addr.slice(0, 20))) return true;
+        return false;
+      });
+      if (match) {
+        db.prepare('UPDATE assets SET current_value = ? WHERE id = ?').run(value, match.id);
+      } else {
+        const schedule = (extracted.appraisedItemType === 'real_estate') ? 'A' : 'B';
+        const category = extracted.appraisedItemType || 'other';
+        db.prepare('INSERT INTO assets (id, case_id, schedule, category, description, current_value, exemption_statute, exemption_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+          uuid(), caseId, schedule, category,
+          `${extracted.appraisedItemDescription || 'Appraised item'} — appraised ${extracted.appraisalDate || ''}`.trim(),
+          value, '', 0
+        );
+      }
+    }
   }
 }
 
@@ -1608,6 +1816,7 @@ function registerIPC() {
           paystub: 'pay_stub', tax_return: 'tax_return', bank_statement: 'bank_statement',
           credit_report: 'credit_report', '1099': '1099', mortgage_statement: 'mortgage_statement',
           insurance_policy: 'insurance_policy', credit_counseling_certificate: 'credit_counseling_certificate',
+          deed: 'deed', lease: 'lease', car_title: 'car_title', appraisal: 'appraisal',
           police_report: 'police_report', medical_bill: 'medical_bill',
           insurance_declaration: 'insurance_declaration',
         };
@@ -1687,6 +1896,10 @@ function registerIPC() {
       'mortgage_statement': 'mortgage_statement',
       'insurance_policy': 'insurance_policy',
       'credit_counseling_certificate': 'credit_counseling_certificate',
+      'deed': 'deed',
+      'lease': 'lease',
+      'car_title': 'car_title',
+      'appraisal': 'appraisal',
       // PI
       'police_report': 'police_report',
       'medical_bill': 'medical_bill',
@@ -2199,6 +2412,22 @@ function guessDocType(filename) {
   }
   if (lower.includes('bank') || lower.includes('statement') || lower.includes('chase') || lower.includes('wells') || lower.includes('boa')) return 'bank_statement';
   if (lower.includes('credit') || lower.includes('equifax') || lower.includes('experian') || lower.includes('transunion')) return 'credit_report';
+  if (
+    lower.includes('deed') || lower.includes('warranty') || lower.includes('quitclaim') ||
+    lower.includes('grant_deed') || lower.includes('granddeed')
+  ) return 'deed';
+  if (
+    lower.includes('lease') || lower.includes('rental_agreement') || lower.includes('rentalagreement') ||
+    lower.includes('tenancy')
+  ) return 'lease';
+  if (
+    lower.includes('title') || lower.includes('vin') || lower.includes('certificate of title') ||
+    lower.includes('vehicle_reg') || lower.includes('car_title')
+  ) return 'car_title';
+  if (
+    lower.includes('appraisal') || lower.includes('valuation_report') ||
+    lower.includes('bpo') || lower.includes('cma')
+  ) return 'appraisal';
   // PI doc types
   if (lower.includes('police') || lower.includes('accident_report') || lower.includes('crash') || lower.includes('incident')) return 'police_report';
   if (lower.includes('medical') || lower.includes('hospital') || lower.includes('bill') || lower.includes('invoice') || lower.includes('eob') || lower.includes('treatment')) return 'medical_bill';

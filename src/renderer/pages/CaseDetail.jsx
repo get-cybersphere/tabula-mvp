@@ -52,6 +52,8 @@ function tabForDocType(docType) {
     case 'bank_statement': case 'mortgage_statement': case 'insurance_policy': return 'overview';
     case 'credit_report': return 'creditors';
     case 'credit_counseling_certificate': return 'timeline';
+    case 'deed': case 'car_title': case 'appraisal': return 'assets';
+    case 'lease': return 'documents';
     case 'police_report': case 'medical_bill': case 'insurance_declaration': return 'overview';
     default: return 'documents';
   }
@@ -61,6 +63,7 @@ const DOC_TYPE_LABEL = {
   pay_stub: 'pay stub', tax_return: 'tax return', bank_statement: 'bank statement',
   credit_report: 'credit report', '1099': '1099', mortgage_statement: 'mortgage statement',
   insurance_policy: 'insurance policy', credit_counseling_certificate: 'credit counseling cert',
+  deed: 'deed', lease: 'lease', car_title: 'car title', appraisal: 'appraisal',
   police_report: 'police report', medical_bill: 'medical bill', insurance_declaration: 'insurance dec',
   other: 'document',
 };

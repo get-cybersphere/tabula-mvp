@@ -11,7 +11,7 @@ const FORMS = [
   { code: 'B121',     order: 1,  label: 'Statement About Your Social Security Numbers', pages: 1,  mapper: 'B121',     required: true,  chapter: 'all' },
   { code: 'B101',     order: 2,  label: 'Voluntary Petition for Individuals',          pages: 9,  mapper: 'B101',     required: true,  chapter: 'all' },
   { code: 'B106Sum',  order: 3,  label: 'Summary of Your Assets and Liabilities',      pages: 2,  mapper: 'B106Sum',  required: true,  chapter: 'all' },
-  { code: 'B106AB',   order: 4,  label: 'Schedule A/B — Property',                     pages: 10, mapper: null,        required: true,  chapter: 'all', headerOnly: true },
+  { code: 'B106AB',   order: 4,  label: 'Schedule A/B — Property',                     pages: 10, mapper: 'B106AB',   required: true,  chapter: 'all' },
   { code: 'B106C',    order: 5,  label: 'Schedule C — Property You Claim as Exempt',   pages: 2,  mapper: null,        required: true,  chapter: 'all', headerOnly: true },
   { code: 'B106D',    order: 6,  label: 'Schedule D — Creditors With Secured Claims',  pages: 3,  mapper: null,        required: true,  chapter: 'all', headerOnly: true },
   { code: 'B106EF',   order: 7,  label: 'Schedule E/F — Unsecured Claims',             pages: 6,  mapper: null,        required: true,  chapter: 'all', headerOnly: true },
