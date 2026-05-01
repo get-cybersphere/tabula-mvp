@@ -20,6 +20,8 @@ const { fillHeader } = require('../src/main/petition/forms/_common');
 const TEMPLATE_DIR = path.join(__dirname, '..', 'src', 'main', 'petition', 'forms', 'templates');
 
 // Synthetic case data in the post-collector shape.
+const _baseCreditors = null; // overwritten below
+
 const data = {
   case: {
     id: 'test-case',
@@ -70,9 +72,30 @@ const data = {
     { id: 'a9', schedule: 'B', category: 'clothing',    description: 'Personal clothing', current_value: 600 },
     { id: 'a10', schedule: 'B', category: 'retirement', description: 'Mercy Hospital 401k', current_value: 18400 },
   ],
-  creditors: [],
-  creditorBuckets: { secured: [], priority: [], unsecured: [] },
-  documents: [],
+  creditors: [
+    { id: 'c1', name: 'Wells Fargo Home Mortgage', address: 'PO Box 14411, Des Moines, IA 50306', accountLast4: '8829', schedule: 'D', type: 'mortgage', claim: 245000, collateral: 'Primary residence', isContingent: false, isDisputed: false },
+    { id: 'c2', name: 'Capital One',               address: 'PO Box 30285, Salt Lake City, UT 84130', accountLast4: '3847', schedule: 'F', type: 'credit_card', claim: 4230, collateral: '', isContingent: false, isDisputed: false },
+    { id: 'c3', name: 'Discover Financial',        address: 'PO Box 30421, Salt Lake City, UT 84130', accountLast4: '9912', schedule: 'F', type: 'credit_card', claim: 7845, collateral: '', isContingent: false, isDisputed: false },
+    { id: 'c4', name: 'Wells Fargo Auto',          address: 'PO Box 25341, Santa Fe, NM',             accountLast4: '7743', schedule: 'D', type: 'auto_loan', claim: 12400, collateral: '2019 Honda Civic', isContingent: false, isDisputed: false },
+    { id: 'c5', name: 'Navient',                   address: 'PO Box 9555, Wilkes-Barre, PA',          accountLast4: '3390', schedule: 'F', type: 'student_loan', claim: 24500, collateral: '', isContingent: false, isDisputed: false },
+    { id: 'c6', name: 'NY State Tax Department',   address: 'WA Harriman Campus, Albany, NY',         accountLast4: '',     schedule: 'E', type: 'tax', claim: 1200, collateral: '', isContingent: false, isDisputed: false },
+  ],
+  creditorBuckets: {
+    secured:   [],  // populated below from creditors
+    priority:  [],
+    unsecured: [],
+  },
+  documents: [
+    { id: 'doc1', doc_type: 'lease', extracted_data: JSON.stringify({
+      type: 'lease', leaseCategory: 'residential',
+      lessor: 'Brooklyn Heights Realty LLC',
+      lessee: 'Maria Vasquez',
+      leasedItem: 'Apt 2C',
+      leasedItemAddress: '413 Linden Blvd Apt 2C, Brooklyn, NY 11203',
+      monthlyRent: 1450,
+      isInDefault: false,
+    })},
+  ],
   computed: {
     grossMonthly1: 4218.00,
     grossMonthly2: 0,
@@ -91,6 +114,11 @@ const data = {
     totalDebt: 52395.00,
   },
 };
+
+// Bucket creditors by schedule (data-collector does this in production).
+data.creditorBuckets.secured   = data.creditors.filter(c => c.schedule === 'D');
+data.creditorBuckets.priority  = data.creditors.filter(c => c.schedule === 'E');
+data.creditorBuckets.unsecured = data.creditors.filter(c => c.schedule === 'F');
 
 function loadMapper(name) {
   if (!name) return null;
