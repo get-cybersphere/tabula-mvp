@@ -131,6 +131,14 @@ contextBridge.exposeInMainWorld('tabula', {
     },
   },
 
+  // Bank statement intelligence
+  bankIntel: {
+    analyze: (caseId) => ipcRenderer.invoke('bankIntel:analyze', caseId),
+    list: (caseId) => ipcRenderer.invoke('bankIntel:list', caseId),
+    setStatus: (findingId, status, note) => ipcRenderer.invoke('bankIntel:setStatus', findingId, status, note),
+    stats: (caseId) => ipcRenderer.invoke('bankIntel:stats', caseId),
+  },
+
   // Petition / filing packet
   petition: {
     listForms: (chapter) => ipcRenderer.invoke('petition:listForms', chapter),
