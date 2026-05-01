@@ -44,6 +44,15 @@ contextBridge.exposeInMainWorld('tabula', {
     upload: (caseId) => ipcRenderer.invoke('documents:upload', caseId),
     list: (caseId) => ipcRenderer.invoke('documents:list', caseId),
     extract: (docId) => ipcRenderer.invoke('documents:extract', docId),
+    delete: (docId) => ipcRenderer.invoke('documents:delete', docId),
+    // Drag-drop multi-file processor. Sends absolute file paths; emits
+    // progress events via the listener registered with onProgress().
+    processFiles: (caseId, filePaths) => ipcRenderer.invoke('documents:processFiles', caseId, filePaths),
+    onProgress: (callback) => {
+      const handler = (_, payload) => callback(payload);
+      ipcRenderer.on('documents:progress', handler);
+      return () => ipcRenderer.removeListener('documents:progress', handler);
+    },
   },
 
   // Review Flags
