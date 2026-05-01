@@ -616,16 +616,148 @@ Extract from this insurance document:
   "notes": "any important observations about coverage"
 }`;
 
-    default:
+    case '1099':
       return `${baseInstruction}
 
-Extract all financial data you can find. Categorize the document and return structured JSON with:
+This is a Form 1099 (any variant: NEC, MISC, INT, DIV, R, G, etc.).
+Identify the variant and extract the income figures.
+
 {
-  "type": "other",
-  "documentCategory": "description of what this document is",
-  "financialData": { ... any relevant financial figures ... },
-  "notes": "any important observations"
+  "type": "1099",
+  "variant": "NEC|MISC|INT|DIV|R|G|K|S|other",
+  "taxYear": 2024,
+  "payerName": "name of payer (the business that issued the 1099)",
+  "payerTIN": "payer TIN if visible (otherwise empty string)",
+  "recipientName": "recipient (debtor) name",
+  "recipientTIN": "recipient TIN if visible",
+  "totalIncome": 0.00,
+  "incomeBreakdown": {
+    "nonemployeeCompensation": 0.00,
+    "rents": 0.00,
+    "royalties": 0.00,
+    "otherIncome": 0.00,
+    "interestIncome": 0.00,
+    "ordinaryDividends": 0.00,
+    "qualifiedDividends": 0.00,
+    "grossDistribution": 0.00,
+    "taxableAmount": 0.00,
+    "federalTaxWithheld": 0.00,
+    "stateTaxWithheld": 0.00
+  },
+  "isAnnual": true,
+  "notes": "anything unusual"
 }`;
+
+    case 'mortgage_statement':
+      return `${baseInstruction}
+
+This is a monthly mortgage statement (or similar — home equity, second mortgage, escrow notice).
+
+{
+  "type": "mortgage_statement",
+  "lenderName": "lender / loan servicer name",
+  "lenderAddress": "lender mailing address",
+  "loanNumber": "loan or account number",
+  "borrowerName": "borrower(s) on the loan",
+  "propertyAddress": "secured property full address (street, city, state, zip)",
+  "statementDate": "MM/DD/YYYY",
+  "principalBalance": 0.00,
+  "totalAmountDue": 0.00,
+  "regularMonthlyPayment": 0.00,
+  "principalAndInterest": 0.00,
+  "escrowAmount": 0.00,
+  "lateFees": 0.00,
+  "pastDueAmount": 0.00,
+  "interestRate": 0.0,
+  "isCurrent": true,
+  "isInForbearance": false,
+  "notes": "loan modification, default notice, anything material"
+}`;
+
+    case 'insurance_policy':
+      return `${baseInstruction}
+
+This is an insurance declaration page or premium notice — ANY type
+(auto, homeowners/renters, life, health, umbrella, vehicle service contract).
+
+{
+  "type": "insurance_policy",
+  "coverageType": "auto|homeowners|renters|life|health|umbrella|other",
+  "carrier": "insurance company name",
+  "policyNumber": "policy number",
+  "policyholderName": "named insured",
+  "effectiveDates": "MM/DD/YYYY - MM/DD/YYYY",
+  "monthlyPremium": 0.00,
+  "annualPremium": 0.00,
+  "deductible": 0.00,
+  "coverageDetails": {
+    "bodilyInjuryLimit": 0.00,
+    "propertyDamageLimit": 0.00,
+    "umUimLimit": 0.00,
+    "comprehensiveLimit": 0.00,
+    "collisionLimit": 0.00,
+    "dwellingLimit": 0.00,
+    "personalPropertyLimit": 0.00,
+    "deathBenefit": 0.00,
+    "cashValue": 0.00
+  },
+  "coveredItem": "vehicle year/make/model OR property address OR insured name",
+  "isWholeLife": false,
+  "notes": "anything unusual about the coverage"
+}`;
+
+    case 'credit_counseling_certificate':
+      return `${baseInstruction}
+
+This is a pre-bankruptcy credit counseling certificate (required under 11 USC 109(h)).
+
+{
+  "type": "credit_counseling_certificate",
+  "agencyName": "approved credit counseling agency name",
+  "certificateNumber": "certificate number",
+  "debtorName": "debtor name on certificate",
+  "completionDate": "MM/DD/YYYY",
+  "expirationDate": "MM/DD/YYYY",
+  "courseType": "pre-filing|post-filing",
+  "approvedByEOUST": true,
+  "notes": "anything about the format of the certificate"
+}`;
+
+    default:
+      // Smart classifier-extractor: when we don't know the doc type by
+      // filename, ask Claude to identify AND extract in one call. Cheaper
+      // than running classify-then-extract round-trip. Claude returns one
+      // of the known `type` values which our auto-populate code routes on.
+      return `${baseInstruction}
+
+Identify which kind of document this is, then extract its fields.
+
+The "type" must be one of:
+- "paystub"                          (employee wage stub)
+- "tax_return"                       (1040 / state return)
+- "bank_statement"                   (any account statement)
+- "credit_report"                    (Equifax / Experian / TransUnion)
+- "1099"                             (any 1099 variant)
+- "mortgage_statement"               (monthly mortgage / escrow / HELOC)
+- "insurance_policy"                 (auto, home, life, health declaration)
+- "credit_counseling_certificate"    (pre-bankruptcy 109(h) certificate)
+- "police_report" | "medical_bill"   (PI documents)
+- "insurance_declaration"            (PI auto coverage declaration)
+- "other"                            (none of the above)
+
+Then add the fields appropriate for that type. The schemas are:
+
+paystub: { type, employer, payPeriod, payFrequency, grossPay, federalTax, stateTax, socialSecurity, medicare, healthInsurance, retirement401k, otherDeductions, garnishments, netPay, ytdGross, ytdNet }
+tax_return: { type, filingStatus, taxYear, wagesIncome, interestIncome, businessIncome, otherIncome, totalIncome, agi, standardDeduction, itemizedDeductions, taxableIncome, totalTax, dependents }
+bank_statement: { type, bank, accountType, accountLast4, statementPeriod, openingBalance, closingBalance, totalDeposits, totalWithdrawals, monthlyExpenses: { rent, utilities, groceries, gas, insurance, carPayment, subscriptions, other }, recurringPayments: [{ payee, amount, frequency }] }
+credit_report: { type, bureau, pullDate, creditScore, accounts: [{ creditor, accountNum, balance, status, type, collateral }] }
+1099: { type, variant, taxYear, payerName, recipientName, totalIncome, incomeBreakdown: { ... }, isAnnual, notes }
+mortgage_statement: { type, lenderName, loanNumber, propertyAddress, principalBalance, regularMonthlyPayment, principalAndInterest, escrowAmount, isCurrent, notes }
+insurance_policy: { type, coverageType, carrier, policyNumber, monthlyPremium, annualPremium, coverageDetails: { ... }, coveredItem, notes }
+credit_counseling_certificate: { type, agencyName, certificateNumber, debtorName, completionDate, courseType, approvedByEOUST, notes }
+other: { type: "other", documentCategory, financialData, notes }
+
+Return ONLY valid JSON, no markdown fences.`;
   }
 }
 
@@ -682,6 +814,70 @@ async function extractWithClaude(filePath, docCategory, debtorContext = {}) {
   }
 }
 
+// Friendly one-line summary for toast notifications. Tells the attorney
+// what just got extracted and how that translates to case data.
+function summarizeExtraction(docType, e) {
+  if (!e) return 'Document extracted.';
+  const fmt$ = (n) => '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  switch (docType || e.type) {
+    case 'pay_stub':
+    case 'paystub':
+      return `Pay stub from ${e.employer || 'employer'} — ${fmt$(e.grossPay)} gross, ${fmt$(e.netPay)} net (${e.payFrequency || 'per period'})`;
+    case 'bank_statement': {
+      const expCount = Object.values(e.monthlyExpenses || {}).filter(v => Number(v) > 0).length;
+      return `Bank statement from ${e.bank || 'bank'} — ${expCount} expense ${expCount === 1 ? 'category' : 'categories'} captured`;
+    }
+    case 'tax_return':
+      return `Tax return ${e.taxYear || ''} — AGI ${fmt$(e.agi)}, ${e.dependents || 0} dependent${e.dependents === 1 ? '' : 's'}`;
+    case 'credit_report': {
+      const n = (e.accounts || []).length;
+      return `Credit report from ${e.bureau || 'bureau'} — ${n} creditor${n === 1 ? '' : 's'} added`;
+    }
+    case '1099':
+      return `1099-${e.variant || ''} from ${e.payerName || 'payer'} — ${fmt$(e.totalIncome)} ${e.taxYear ? '(tax year ' + e.taxYear + ')' : 'annual'}`;
+    case 'mortgage_statement':
+      return `Mortgage statement from ${e.lenderName || 'lender'} — ${fmt$(e.regularMonthlyPayment)}/mo, ${fmt$(e.principalBalance)} balance`;
+    case 'insurance_policy': {
+      const t = (e.coverageType || 'policy').replace(/_/g, ' ');
+      const m = Number(e.monthlyPremium || (e.annualPremium ? e.annualPremium / 12 : 0));
+      return `${t.charAt(0).toUpperCase() + t.slice(1)} policy from ${e.carrier || 'carrier'} — ${fmt$(m)}/mo premium`;
+    }
+    case 'credit_counseling_certificate':
+      return `Credit counseling certificate filed (109(h) prerequisite) — ${e.agencyName || 'agency'}`;
+    case 'police_report':
+      return `Police report — ${e.accidentType || 'accident'} on ${e.accidentDate || 'date'}, ${e.atFaultParty || 'at-fault party'}`;
+    case 'medical_bill':
+      return `Medical bill from ${e.providerName || 'provider'} — ${fmt$(e.totalBilled)} billed${e.hasLien ? ', lien attached' : ''}`;
+    case 'insurance_declaration':
+      return `Insurance declaration from ${e.insuranceCompany || 'carrier'} — BI limit ${fmt$(e.bodilyInjuryLimit)}`;
+    default:
+      return e.documentCategory || 'Document extracted.';
+  }
+}
+
+// What case-detail tab should the attorney click through to after extraction?
+function tabForDocType(docType) {
+  switch (docType) {
+    case 'pay_stub':
+    case '1099':
+    case 'tax_return':
+      return 'overview';
+    case 'bank_statement':
+    case 'mortgage_statement':
+    case 'insurance_policy':
+      return 'overview';
+    case 'credit_report':
+    case 'credit_counseling_certificate':
+      return 'creditors';
+    case 'police_report':
+    case 'medical_bill':
+    case 'insurance_declaration':
+      return 'overview';
+    default:
+      return 'documents';
+  }
+}
+
 // ─── Auto-populate case data from extraction ─────────────────
 function populateCaseFromExtraction(caseId, docType, extracted) {
   const { v4: uuid } = require('uuid');
@@ -730,6 +926,104 @@ function populateCaseFromExtraction(caseId, docType, extracted) {
         debtType, schedule, acct.balance || 0, 0, 0
       );
     }
+  }
+
+  // ─── 1099: convert annual to monthly, log as income ─────────
+  if (docType === '1099' || extracted.type === '1099') {
+    const annual = Number(extracted.totalIncome || 0);
+    const monthly = annual > 0 ? Math.round((annual / 12) * 100) / 100 : 0;
+    const variant = (extracted.variant || '').toUpperCase();
+    const label =
+      variant === 'NEC' ? 'Self-employment (1099-NEC)' :
+      variant === 'MISC' ? '1099-MISC income' :
+      variant === 'INT' ? '1099-INT interest' :
+      variant === 'DIV' ? '1099-DIV dividends' :
+      variant === 'R' ? '1099-R retirement distribution' :
+      `1099-${variant || 'income'}`;
+    if (monthly > 0) {
+      db.prepare('INSERT INTO income (id, case_id, source, employer_name, gross_monthly, net_monthly, pay_frequency) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        uuid(), caseId, label, extracted.payerName || 'Unknown payer',
+        monthly, monthly, 'annual'
+      );
+    }
+  }
+
+  // ─── Mortgage statement: monthly expense + secured creditor ─
+  if (docType === 'mortgage_statement' || extracted.type === 'mortgage_statement') {
+    const monthly = Number(extracted.regularMonthlyPayment || 0);
+    if (monthly > 0) {
+      db.prepare('INSERT INTO expenses (id, case_id, category, description, monthly_amount) VALUES (?, ?, ?, ?, ?)').run(
+        uuid(), caseId, 'Rent/Mortgage',
+        `${extracted.lenderName || 'Mortgage'}${extracted.loanNumber ? ' acct *' + String(extracted.loanNumber).slice(-4) : ''}`,
+        monthly
+      );
+    }
+    if (Number(extracted.principalBalance || 0) > 0) {
+      db.prepare('INSERT INTO creditors (id, case_id, name, address, account_number, debt_type, schedule, amount_claimed, collateral_description, is_disputed, is_contingent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+        uuid(), caseId,
+        extracted.lenderName || 'Mortgage holder',
+        extracted.lenderAddress || '',
+        extracted.loanNumber || '',
+        'mortgage', 'D',
+        Number(extracted.principalBalance || 0),
+        extracted.propertyAddress || 'Real property — see Schedule A/B',
+        0, 0
+      );
+    }
+    // Real-property asset row tied to the property described on the statement.
+    if (extracted.propertyAddress) {
+      db.prepare('INSERT INTO assets (id, case_id, schedule, category, description, current_value, exemption_statute, exemption_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+        uuid(), caseId, 'A', 'real_estate',
+        `Residence — ${extracted.propertyAddress}`,
+        0, '', 0
+      );
+    }
+  }
+
+  // ─── Insurance policy: monthly premium expense + life cash value asset
+  if (docType === 'insurance_policy' || extracted.type === 'insurance_policy') {
+    const monthlyPremium = Number(
+      extracted.monthlyPremium ||
+      (extracted.annualPremium ? extracted.annualPremium / 12 : 0)
+    );
+    const ct = (extracted.coverageType || 'other').toLowerCase();
+    if (monthlyPremium > 0) {
+      const category =
+        ct === 'auto' ? 'Auto insurance' :
+        ct === 'homeowners' || ct === 'renters' ? 'Property insurance' :
+        ct === 'life' ? 'Life insurance' :
+        ct === 'health' ? 'Health insurance' : 'Insurance';
+      db.prepare('INSERT INTO expenses (id, case_id, category, description, monthly_amount) VALUES (?, ?, ?, ?, ?)').run(
+        uuid(), caseId, category,
+        `${extracted.carrier || 'Carrier'}${extracted.policyNumber ? ' #' + String(extracted.policyNumber).slice(-6) : ''}${extracted.coveredItem ? ' — ' + extracted.coveredItem : ''}`,
+        Math.round(monthlyPremium * 100) / 100
+      );
+    }
+    // Cash-value life policies become Schedule A/B personal-property assets.
+    const cashValue = Number(extracted.coverageDetails?.cashValue || 0);
+    if (ct === 'life' && cashValue > 0) {
+      db.prepare('INSERT INTO assets (id, case_id, schedule, category, description, current_value, exemption_statute, exemption_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+        uuid(), caseId, 'B', 'life_insurance',
+        `${extracted.carrier || 'Life insurance'} policy ${extracted.policyNumber || ''} — cash value`.trim(),
+        cashValue, '', 0
+      );
+    }
+  }
+
+  // ─── Credit counseling certificate: log event, no DB rows ───
+  // The cert itself isn't case data, but its presence is a 109(h) prerequisite.
+  // We log a strong event so the timeline / completeness check picks it up,
+  // and stash a flag in case_events metadata so the petition module can see it.
+  if (docType === 'credit_counseling_certificate' || extracted.type === 'credit_counseling_certificate') {
+    logCaseEvent(caseId, 'credit_counseling_completed',
+      `Credit counseling certificate on file — ${extracted.agencyName || 'agency'}, completed ${extracted.completionDate || 'date unknown'}`,
+      {
+        agency: extracted.agencyName,
+        certificate_number: extracted.certificateNumber,
+        completion_date: extracted.completionDate,
+        course_type: extracted.courseType || 'pre-filing',
+      }
+    );
   }
 }
 
@@ -1143,6 +1437,142 @@ function registerIPC() {
     return db.prepare('SELECT * FROM documents WHERE case_id = ? ORDER BY uploaded_at DESC').all(caseId);
   });
 
+  // Drag-drop multi-file processing.
+  // The renderer sends absolute paths (Electron exposes file.path on dropped
+  // File objects). For each file we: copy → classify by filename → insert
+  // documents row → run extractWithClaude → populate case → emit progress.
+  // Progress events stream back via webContents.send so the UI can toast each
+  // success and refresh case state in real time.
+  ipcMain.handle('documents:processFiles', async (_, caseId, filePaths) => {
+    if (!Array.isArray(filePaths) || filePaths.length === 0) return { processed: 0, failed: 0 };
+    const { v4: uuid } = require('uuid');
+    const win = mainWindow;
+    const send = (payload) => { try { win?.webContents?.send('documents:progress', payload); } catch {} };
+
+    // Filter to file paths that exist + are not directories.
+    const validPaths = filePaths.filter(p => {
+      try {
+        const s = fs.statSync(p);
+        return s.isFile();
+      } catch { return false; }
+    });
+
+    const docsDir = path.join(app.getPath('userData'), 'documents', caseId);
+    if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+
+    send({ stage: 'start', caseId, total: validPaths.length });
+
+    let processed = 0, failed = 0;
+    for (let i = 0; i < validPaths.length; i++) {
+      const filePath = validPaths[i];
+      const filename = path.basename(filePath);
+      const ext = path.extname(filename).toLowerCase();
+      // Only process supported extensions.
+      if (!['.pdf', '.png', '.jpg', '.jpeg', '.csv'].includes(ext)) {
+        failed++;
+        send({ stage: 'error', index: i, total: validPaths.length, filename, error: `unsupported file type: ${ext || '(none)'}` });
+        continue;
+      }
+
+      try {
+        const id = uuid();
+        const destPath = path.join(docsDir, `${id}_${filename}`);
+        fs.copyFileSync(filePath, destPath);
+        const docType = guessDocType(filename);
+        const now = new Date().toISOString();
+        db.prepare('INSERT INTO documents (id, case_id, filename, file_path, doc_type, uploaded_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, caseId, filename, destPath, docType, now);
+        logCaseEvent(caseId, 'document_uploaded',
+          `Uploaded ${filename} (${(docType || 'other').replace('_', ' ')})`,
+          { document_id: id, filename, doc_type: docType }
+        );
+
+        send({ stage: 'extracting', index: i, total: validPaths.length, filename, docType, docId: id });
+
+        // Reuse the same extraction path as documents:extract.
+        const categoryMap = {
+          'pay_stub': 'paystub', 'tax_return': 'tax_return', 'bank_statement': 'bank_statement',
+          'credit_report': 'other', '1099': '1099', 'mortgage_statement': 'mortgage_statement',
+          'insurance_policy': 'insurance_policy', 'credit_counseling_certificate': 'credit_counseling_certificate',
+          'police_report': 'police_report', 'medical_bill': 'medical_bill',
+          'insurance_declaration': 'insurance_declaration', 'other': 'other',
+        };
+        const category = categoryMap[docType] || 'other';
+        const debtorContext = getDebtorContextForDoc(id);
+
+        let extracted;
+        try {
+          extracted = await extractWithClaude(destPath, category, debtorContext);
+        } catch (err) {
+          console.error('Claude extraction failed, using mock:', err.message);
+          extracted = mockExtract(docType, filename);
+          extracted._mock = true;
+        }
+
+        db.prepare('UPDATE documents SET extracted_data = ? WHERE id = ?').run(JSON.stringify(extracted), id);
+
+        // If Claude classified it differently than our filename guess, update
+        // the doc_type to match so case data goes to the right place.
+        const claudeType = extracted.type;
+        const claudeToDocType = {
+          paystub: 'pay_stub', tax_return: 'tax_return', bank_statement: 'bank_statement',
+          credit_report: 'credit_report', '1099': '1099', mortgage_statement: 'mortgage_statement',
+          insurance_policy: 'insurance_policy', credit_counseling_certificate: 'credit_counseling_certificate',
+          police_report: 'police_report', medical_bill: 'medical_bill',
+          insurance_declaration: 'insurance_declaration',
+        };
+        const reclassified = claudeToDocType[claudeType];
+        const finalDocType = reclassified && reclassified !== docType ? reclassified : docType;
+        if (reclassified && reclassified !== docType) {
+          db.prepare('UPDATE documents SET doc_type = ? WHERE id = ?').run(finalDocType, id);
+        }
+
+        populateCaseFromExtraction(caseId, finalDocType, extracted);
+        populatePICaseFromExtraction(caseId, finalDocType, extracted);
+
+        logCaseEvent(caseId, 'document_extracted',
+          `Extracted ${filename}${extracted._mock ? ' (mock)' : ''}`,
+          { document_id: id, mock: !!extracted._mock, redaction_count: extracted._redactionCount || 0 }
+        );
+
+        const summary = summarizeExtraction(finalDocType, extracted);
+        processed++;
+        send({
+          stage: 'done',
+          index: i,
+          total: validPaths.length,
+          filename,
+          docType: finalDocType,
+          docId: id,
+          summary,
+          mock: !!extracted._mock,
+          reclassified: reclassified && reclassified !== docType ? { from: docType, to: finalDocType } : null,
+        });
+      } catch (err) {
+        failed++;
+        console.error('processFiles failed for', filename, err);
+        send({ stage: 'error', index: i, total: validPaths.length, filename, error: err.message });
+      }
+    }
+
+    send({ stage: 'complete', caseId, total: validPaths.length, processed, failed });
+    return { processed, failed };
+  });
+
+  // Delete a document — used when a drag-drop classifies wrong and the
+  // attorney wants to remove the row + populated data is regenerated by
+  // re-uploading. Only deletes the documents row + file; populated case
+  // data (income, expenses, etc.) is left in place since other docs may
+  // have contributed to the same rows.
+  ipcMain.handle('documents:delete', (_, docId) => {
+    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(docId);
+    if (!doc) return { success: false, reason: 'not found' };
+    if (doc.file_path && fs.existsSync(doc.file_path)) {
+      try { fs.unlinkSync(doc.file_path); } catch {}
+    }
+    db.prepare('DELETE FROM documents WHERE id = ?').run(docId);
+    return { success: true };
+  });
+
   ipcMain.handle('documents:extract', async (_, docId) => {
     const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(docId);
     if (!doc) return null;
@@ -1153,6 +1583,10 @@ function registerIPC() {
       'tax_return': 'tax_return',
       'bank_statement': 'bank_statement',
       'credit_report': 'other',
+      '1099': '1099',
+      'mortgage_statement': 'mortgage_statement',
+      'insurance_policy': 'insurance_policy',
+      'credit_counseling_certificate': 'credit_counseling_certificate',
       // PI
       'police_report': 'police_report',
       'medical_bill': 'medical_bill',
@@ -1638,16 +2072,30 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
 
 function guessDocType(filename) {
   const lower = filename.toLowerCase();
-  // Bankruptcy doc types
+  // Bankruptcy doc types — order matters: more specific patterns first.
+  if (lower.includes('1099')) return '1099';
   if (lower.includes('w2') || lower.includes('w-2')) return 'tax_return';
   if (lower.includes('tax') || lower.includes('1040')) return 'tax_return';
   if (lower.includes('pay') || lower.includes('stub') || lower.includes('earnings')) return 'pay_stub';
+  if (
+    lower.includes('mortgage') || lower.includes('escrow') || lower.includes('heloc') ||
+    lower.includes('home loan') || lower.includes('homeloan')
+  ) return 'mortgage_statement';
+  if (lower.includes('credit') && (lower.includes('counsel') || lower.includes('certificate') || lower.includes('109h'))) {
+    return 'credit_counseling_certificate';
+  }
   if (lower.includes('bank') || lower.includes('statement') || lower.includes('chase') || lower.includes('wells') || lower.includes('boa')) return 'bank_statement';
   if (lower.includes('credit') || lower.includes('equifax') || lower.includes('experian') || lower.includes('transunion')) return 'credit_report';
   // PI doc types
   if (lower.includes('police') || lower.includes('accident_report') || lower.includes('crash') || lower.includes('incident')) return 'police_report';
   if (lower.includes('medical') || lower.includes('hospital') || lower.includes('bill') || lower.includes('invoice') || lower.includes('eob') || lower.includes('treatment')) return 'medical_bill';
-  if (lower.includes('insurance') || lower.includes('declaration') || lower.includes('policy') || lower.includes('coverage') || lower.includes('claim')) return 'insurance_declaration';
+  // Insurance: prefer the bankruptcy-flavored insurance_policy unless this
+  // is clearly a PI auto-coverage declaration.
+  if (lower.includes('insurance') || lower.includes('policy')) {
+    if (lower.includes('auto') || lower.includes('liability') || lower.includes('claim')) return 'insurance_declaration';
+    return 'insurance_policy';
+  }
+  if (lower.includes('declaration') || lower.includes('coverage')) return 'insurance_declaration';
   return 'other';
 }
 

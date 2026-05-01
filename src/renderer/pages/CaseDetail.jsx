@@ -7,6 +7,8 @@ import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
 import FilingTab from '../components/case/FilingTab.jsx';
+import DropOverlay from '../components/DropOverlay.jsx';
+import { Toaster, useToaster } from '../components/Toaster.jsx';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -40,11 +42,34 @@ const PI_TABS = [
 
 const TABS = BANKRUPTCY_TABS; // default, overridden per-case below
 
+// Map a doc type to its destination tab so toast click-throughs land on
+// the surface where the just-extracted data shows up.
+function tabForDocType(docType) {
+  switch (docType) {
+    case 'pay_stub': case '1099': case 'tax_return': return 'overview';
+    case 'bank_statement': case 'mortgage_statement': case 'insurance_policy': return 'overview';
+    case 'credit_report': return 'creditors';
+    case 'credit_counseling_certificate': return 'timeline';
+    case 'police_report': case 'medical_bill': case 'insurance_declaration': return 'overview';
+    default: return 'documents';
+  }
+}
+
+const DOC_TYPE_LABEL = {
+  pay_stub: 'pay stub', tax_return: 'tax return', bank_statement: 'bank statement',
+  credit_report: 'credit report', '1099': '1099', mortgage_statement: 'mortgage statement',
+  insurance_policy: 'insurance policy', credit_counseling_certificate: 'credit counseling cert',
+  police_report: 'police report', medical_bill: 'medical bill', insurance_declaration: 'insurance dec',
+  other: 'document',
+};
+
 export default function CaseDetail({ caseId, initialTab, navigate }) {
   const [caseData, setCaseData] = useState(null);
   const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const [loading, setLoading] = useState(true);
   const [aiOpen, setAiOpen] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const { toasts, toast, update, dismiss } = useToaster();
 
   const loadCase = useCallback(async () => {
     setLoading(true);
@@ -56,6 +81,66 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
   useEffect(() => {
     loadCase();
   }, [loadCase]);
+
+  // Stream progress events from the main-process drag-drop processor and
+  // surface them as toasts. Each successful 'done' triggers a quiet case
+  // re-fetch so the completeness % climbs and downstream tabs see new
+  // income/expenses/creditors immediately.
+  useEffect(() => {
+    if (!window.tabula?.documents?.onProgress) return;
+    const PROGRESS_TOAST = 'doc-batch';
+    const off = window.tabula.documents.onProgress((p) => {
+      if (p.stage === 'start') {
+        setProcessing(true);
+        toast({
+          id: PROGRESS_TOAST,
+          tone: 'progress',
+          title: `Processing ${p.total} document${p.total === 1 ? '' : 's'}…`,
+          body: 'Detecting type, redacting PII, extracting fields',
+          duration: 0,
+        });
+      } else if (p.stage === 'extracting') {
+        update(PROGRESS_TOAST, {
+          title: `Processing ${p.index + 1} of ${p.total}`,
+          body: `${p.filename} — ${DOC_TYPE_LABEL[p.docType] || 'document'}`,
+        });
+      } else if (p.stage === 'done') {
+        toast({
+          tone: p.mock ? 'warn' : 'success',
+          title: p.summary || 'Document extracted',
+          body: p.mock ? 'Mock data — set ANTHROPIC_API_KEY for real extraction' : p.filename,
+          meta: DOC_TYPE_LABEL[p.docType] || 'doc',
+          onClick: () => setActiveTab(tabForDocType(p.docType)),
+        });
+        // Live refresh: completeness, downstream tabs, packet preview.
+        loadCase();
+      } else if (p.stage === 'error') {
+        toast({
+          tone: 'error',
+          title: 'Couldn\'t process file',
+          body: `${p.filename}: ${p.error}`,
+        });
+      } else if (p.stage === 'complete') {
+        setProcessing(false);
+        update(PROGRESS_TOAST, {
+          tone: p.failed > 0 ? 'warn' : 'success',
+          title: `Done — ${p.processed} processed${p.failed > 0 ? `, ${p.failed} failed` : ''}`,
+          body: 'Review case data on each tab. Generate filing packet when ready.',
+          duration: 6000,
+        });
+      }
+    });
+    return off;
+  }, [toast, update, loadCase]);
+
+  const handleDropFiles = useCallback(async (paths) => {
+    if (!paths || paths.length === 0) return;
+    if (processing) {
+      toast({ tone: 'warn', title: 'Hold on a sec', body: 'Already processing the previous batch.' });
+      return;
+    }
+    await window.tabula.documents.processFiles(caseId, paths);
+  }, [caseId, processing, toast]);
 
   const handleStatusChange = async (newStatus) => {
     await window.tabula.cases.update(caseId, { status: newStatus });
@@ -217,6 +302,12 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
         isOpen={aiOpen}
         onClose={() => setAiOpen(false)}
       />
+
+      {/* Drag-drop intake — full window when files dragged over */}
+      <DropOverlay onFiles={handleDropFiles} enabled={!processing} />
+
+      {/* Toast notifications — top right, click-through to relevant tab */}
+      <Toaster toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }
