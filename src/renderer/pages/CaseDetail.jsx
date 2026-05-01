@@ -6,6 +6,7 @@ import { computeCompleteness } from '../lib/case-completeness.js';
 import { computeDeadlines } from '../lib/deadlines.js';
 import AIAssistant from '../components/case/AIAssistant.jsx';
 import { AccidentDetailsTab, MedicalRecordsTab, CaseValuationTab, SettlementTab, PIDeadlinesTab } from '../components/case/PIWorkflow.jsx';
+import FilingTab from '../components/case/FilingTab.jsx';
 
 const STATUS_LABELS = {
   intake: 'Intake',
@@ -21,6 +22,7 @@ const BANKRUPTCY_TABS = [
   { key: 'assets', label: 'Assets' },
   { key: 'creditors', label: 'Creditors' },
   { key: 'means-test', label: 'Means Test' },
+  { key: 'filing', label: 'Filing' },
   { key: 'review', label: 'Review' },
 ];
 
@@ -196,6 +198,7 @@ export default function CaseDetail({ caseId, initialTab, navigate }) {
             {!isPI && activeTab === 'assets' && <AssetsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
             {!isPI && activeTab === 'creditors' && <CreditorsTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
             {!isPI && activeTab === 'means-test' && <MeansTestTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
+            {!isPI && activeTab === 'filing' && <FilingTab caseData={caseData} caseId={caseId} onRefresh={loadCase} />}
 
             {/* PI-only tabs */}
             {isPI && activeTab === 'accident' && <AccidentDetailsTab caseId={caseId} caseData={caseData} onRefresh={loadCase} />}
