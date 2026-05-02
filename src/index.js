@@ -496,7 +496,7 @@ function seedDemoData() {
 
 // ─── Means Test: Anthropic Extraction (via LiteLLM proxy + local redaction) ──
 const Anthropic = require('@anthropic-ai/sdk').default;
-const { redactForExtraction, cleanup: redactionCleanup } = require('./main/redaction');
+const { redactForExtraction, cleanup: redactionCleanup, redactText } = require('./main/redaction');
 
 function getAnthropicClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -2192,11 +2192,33 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
     try {
       const client = getAnthropicClient();
 
-      const messages = history.map(h => ({ role: h.role, content: h.content }));
-      messages.push({ role: 'user', content: userMessage });
+      // Defense-in-depth: scrub SSN/account/phone/email/DOB/ITIN/routing/DL
+      // out of user-typed text before it leaves the renderer. The LiteLLM
+      // proxy's Presidio guardrail is the second line; this is the first.
+      const debtorContext = {
+        firstName: debtors[0]?.first_name,
+        lastName: debtors[0]?.last_name,
+        street: debtors[0]?.address_street,
+      };
+      let totalRedactions = 0;
+      const messages = history.map(h => {
+        if (h.role !== 'user') return { role: h.role, content: h.content };
+        const { text, detections } = redactText(h.content, debtorContext);
+        totalRedactions += detections.length;
+        return { role: 'user', content: text };
+      });
+      const { text: redactedUser, detections: userDetections } = redactText(userMessage, debtorContext);
+      totalRedactions += userDetections.length;
+      messages.push({ role: 'user', content: redactedUser });
+
+      if (totalRedactions > 0) {
+        console.log(`[redaction] chat: ${totalRedactions} PII region(s) scrubbed before API call`);
+      }
 
       const response = await client.messages.create({
-        model: process.env.LITELLM_BASE_URL ? 'tabula-extract' : 'claude-sonnet-4-20250514',
+        // Text-only LiteLLM alias (lower max_tokens, same upstream model).
+        // Falls back to a direct Anthropic model id when the proxy is off.
+        model: process.env.LITELLM_BASE_URL ? 'tabula-extract-text' : 'claude-sonnet-4-20250514',
         max_tokens: 2048,
         system: systemPrompt,
         messages,
@@ -2207,7 +2229,7 @@ Be concise, specific to THIS case, and help the attorney with analysis, drafting
       // Save assistant response
       db.prepare('INSERT INTO ai_conversations (id, case_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(uuid(), caseId, 'assistant', assistantMessage, new Date().toISOString());
 
-      return { message: assistantMessage };
+      return { message: assistantMessage, redactionCount: totalRedactions };
     } catch (err) {
       console.error('AI chat error:', err.message);
       return { message: `I'm unable to connect to the AI service right now. Error: ${err.message}`, error: true };
